@@ -1051,6 +1051,131 @@ def post_fleet_attach(body: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+@router.post("/fleet/child-status")
+def post_fleet_child_status(body: dict[str, Any]) -> dict[str, Any]:
+    """Set a child's status within a campaign spine (bounded, validated write)."""
+    data = body if isinstance(body, dict) else {}
+    campaign_id = str(data.get("campaign_id") or "").strip()
+    child_id = str(data.get("child_id") or "").strip()
+    status = str(data.get("status") or "").strip()
+    if not campaign_id or len(campaign_id) > 80 or any(ch in campaign_id for ch in "/\\"):
+        raise HTTPException(status_code=422, detail="campaign_id_invalid")
+    if not child_id or len(child_id) > 80 or any(ch in child_id for ch in "/\\"):
+        raise HTTPException(status_code=422, detail="child_id_invalid")
+    if status not in {"planned", "active", "waiting", "blocked", "completed", "failed", "abandoned", "canceled", "archived"}:
+        raise HTTPException(status_code=422, detail="status_invalid")
+    reason = str(data.get("reason") or "").strip()[:300]
+    try:
+        from harness_homebase_mcp import call_tool
+
+        request: dict[str, Any] = {"campaign_id": campaign_id, "child_id": child_id, "status": status}
+        if reason:
+            request["reason"] = reason
+        result = call_tool(
+            "homebase_campaign_fleet_write",
+            {"root": str(PLUGIN_ROOT), "operation": "set_child_status", "request_json": json.dumps(request)},
+        )
+        structured = result.get("structuredContent") or {}
+    except Exception as exc:
+        reason_out = "campaign_not_found" if type(exc).__name__ == "CampaignNotFound" else f"fleet write failed: {type(exc).__name__}"
+        return {
+            "schema": "sips.fleet.write.v1",
+            "available": False,
+            "reason": reason_out,
+            "campaign_id": campaign_id,
+            "child_id": child_id,
+            "generated_at": _now(),
+            "claim_boundary": "The fleet write failed before producing state.",
+        }
+    raw_campaign = structured.get("data")
+    campaign = raw_campaign if isinstance(raw_campaign, dict) else {}
+    return {
+        "schema": "sips.fleet.write.v1",
+        "available": True,
+        "campaign_id": campaign_id,
+        "child_id": child_id,
+        "status": status,
+        "revision": int(campaign.get("revision") or 0),
+        "generated_at": _now(),
+        "claim_boundary": "Child status is campaign metadata; the conversation lives in the host.",
+    }
+
+
+@router.get("/memory")
+def get_memory(tier: str = "", status: str = "", query: str = "", limit: int = 20) -> dict[str, Any]:
+    """Bounded browse view of the Memory Fabric store, filterable by tier/status.
+
+    Newest first; strings truncated; never returns record bodies over the
+    summary length. This is a browser, not a ranked recall — use the panel's
+    Recall card for relevance-ranked search.
+    """
+    if load_records is None or store_path is None:
+        return {
+            "schema": "sips.memory.browse.v1",
+            "available": False,
+            "reason": "memory_fabric_unavailable",
+            "records": [],
+            "generated_at": _now(),
+            "claim_boundary": "Memory Fabric is not importable in this process.",
+        }
+    tier = tier.strip().lower()[:20]
+    status = status.strip().lower()[:20]
+    query = query.strip().lower()[:200]
+    if tier and tier not in {"work", "knowledge", "learning"}:
+        raise HTTPException(status_code=422, detail="tier_invalid")
+    if status and status not in {"active", "candidate", "superseded", "archived"}:
+        raise HTTPException(status_code=422, detail="status_invalid")
+    limit = max(1, min(int(limit or 20), 50))
+    try:
+        records = load_records()
+    except Exception as exc:
+        return {
+            "schema": "sips.memory.browse.v1",
+            "available": False,
+            "reason": f"store read failed: {type(exc).__name__}",
+            "records": [],
+            "generated_at": _now(),
+            "claim_boundary": "The memory store could not be read.",
+        }
+    filtered = []
+    for rec in records:
+        if not isinstance(rec, dict):
+            continue
+        if tier and rec.get("tier") != tier:
+            continue
+        if status and rec.get("status") != status:
+            continue
+        if query:
+            haystack = f"{rec.get('title') or ''} {rec.get('body') or ''}".lower()
+            if query not in haystack:
+                continue
+        filtered.append(rec)
+    filtered.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+    out = [
+        {
+            "id": str(r.get("id") or "")[:80],
+            "title": str(r.get("title") or "")[:200],
+            "tier": str(r.get("tier") or "")[:20],
+            "status": str(r.get("status") or "")[:20],
+            "confidence": str(r.get("confidence") or "")[:20],
+            "tags": [str(t)[:40] for t in (r.get("tags") or [])[:6] if isinstance(t, (str, int))],
+            "scope": str(r.get("scope") or "")[:160],
+            "created_at": str(r.get("created_at") or "")[:40],
+            "preview": str(r.get("body") or "")[:260],
+        }
+        for r in filtered[:limit]
+    ]
+    return {
+        "schema": "sips.memory.browse.v1",
+        "available": True,
+        "total_matched": len(filtered),
+        "total_records": len(records),
+        "records": out,
+        "generated_at": _now(),
+        "claim_boundary": "Bounded browse projection; full bodies stay in the store.",
+    }
+
+
 @router.get("/routes")
 def get_routes() -> dict[str, Any]:
     try:

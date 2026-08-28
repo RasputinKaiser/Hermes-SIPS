@@ -353,7 +353,16 @@ const styles = {
   taskAttempts: { color: COLORS.muted, fontSize: '12px', fontVariantNumeric: 'tabular-nums', flexShrink: 0 },
   eventRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '10px', minWidth: 0 },
   eventType: { fontSize: '12px', fontWeight: 650, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  childRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', minWidth: 0 }
+  childRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', minWidth: 0 },
+  childStack: { display: 'grid', gap: '4px', minWidth: 0 },
+  childStatusWrap: { position: 'relative', display: 'inline-flex', flexShrink: 0 },
+  childStatusBtn: { display: 'inline-flex', alignItems: 'center', gap: '3px', minHeight: '22px', padding: '0 7px', border: `1px solid ${COLORS.border}`, borderRadius: '999px', background: 'transparent', color: COLORS.muted, fontSize: '11px', cursor: 'pointer' },
+  childStatusMenu: { position: 'absolute', top: 'calc(100% + 4px)', right: 0, zIndex: 30, display: 'grid', minWidth: '132px', padding: '4px', border: `1px solid ${COLORS.border}`, borderRadius: '9px', background: 'var(--ui-surface-raised, #1c2027)', boxShadow: '0 10px 26px rgba(0,0,0,0.35)' },
+  childStatusOption: { border: 0, background: 'transparent', color: COLORS.text, fontSize: '12px', textAlign: 'left', padding: '6px 8px', borderRadius: '6px', cursor: 'pointer' },
+  childStatusOptionCurrent: { color: COLORS.muted, cursor: 'default' },
+  childStatusOptionDanger: { color: COLORS.bad },
+  memoryFilters: { display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' },
+  memoryMatched: { color: COLORS.muted, fontSize: '12px', fontVariantNumeric: 'tabular-nums', marginTop: '6px' }
 }
 
 function toneFor(value) {
@@ -1637,6 +1646,74 @@ function RunDetail({ api, runId }) {
   ] })
 }
 
+// --- Child status menu ------------------------------------------------------
+// Compact per-child status control in the expanded campaign panel: a small
+// pill button that opens a click-to-open dropdown of the most useful status
+// actions (the badge itself already shows the current status). Disabled while
+// a write is in flight; failures surface via the shared feedback line below
+// the children list. 'Archived' is styled destructive.
+const CHILD_STATUS_ACTIONS = [
+  { status: 'active', label: 'Set active' },
+  { status: 'blocked', label: 'Set blocked' },
+  { status: 'completed', label: 'Set completed' },
+  { status: 'abandoned', label: 'Set abandoned' },
+  { status: 'archived', label: 'Archived', destructive: true }
+]
+
+function ChildStatusMenu({ api, campaignId, child, onResult }) {
+  const [open, setOpen] = useState(false)
+  const queryClient = useQueryClient()
+  const mutation = useSipsMutation(api, {
+    // useSipsMutation's string invalidateKeys cover the fleet list; the
+    // campaign-scoped detail key needs the full array, invalidated explicitly.
+    invalidateKeys: ['fleet'],
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['sips-control-plane', 'fleet-detail', campaignId] })
+      setOpen(false)
+      if (!result?.available) onResult(fleetWriteErrorText(result), true)
+    },
+    onError: (error) => {
+      setOpen(false)
+      onResult(fleetWriteErrorText(null, error), true)
+    }
+  })
+  const busy = mutation.isPending || mutation.isLoading
+  const set = (status) => {
+    if (busy || status === child.status) return
+    onResult(null, false)
+    mutation.mutate({ path: '/fleet/child-status', body: { campaign_id: campaignId, child_id: child.child_id, status } })
+  }
+
+  return jsxs('span', { style: styles.childStatusWrap, children: [
+    jsx('button', {
+      type: 'button',
+      'aria-label': `Status actions for ${child.title || child.child_id}`,
+      'aria-expanded': open,
+      disabled: busy,
+      onClick: () => setOpen((value) => !value),
+      style: { ...styles.childStatusBtn, ...(open ? { color: COLORS.text, borderColor: COLORS.accent } : {}) },
+      children: [
+        jsx(Codicon, { name: 'settings', size: '0.75rem' }),
+        busy ? '…' : null
+      ]
+    }),
+    open ? jsxs('span', { style: styles.childStatusMenu, role: 'menu', children: [
+      ...CHILD_STATUS_ACTIONS.map((action) => {
+        const current = action.status === child.status || (action.status === 'archived' && child.archived)
+        return jsx('button', {
+          type: 'button',
+          role: 'menuitem',
+          key: action.status,
+          disabled: busy || current,
+          onClick: () => set(action.status),
+          style: { ...styles.childStatusOption, ...(current ? styles.childStatusOptionCurrent : {}), ...(action.destructive ? styles.childStatusOptionDanger : {}) },
+          children: `${action.label}${current ? ' · current' : ''}`
+        }, action.status)
+      })
+    ] }) : null
+  ] })
+}
+
 function FleetDetail({ api, campaignId }) {
   const query = useQuery({
     queryKey: ['sips-control-plane', 'fleet-detail', campaignId],
@@ -1655,6 +1732,12 @@ function FleetDetail({ api, campaignId }) {
   }
   const children = detail.children || []
   const activity = (detail.activity || []).slice().reverse() // most recent last
+  const [statusFeedback, setStatusFeedback] = useState(null)
+  const [statusFeedbackError, setStatusFeedbackError] = useState(false)
+  const handleStatusResult = (message, isError) => {
+    setStatusFeedback(message)
+    setStatusFeedbackError(Boolean(isError))
+  }
 
   return jsxs('div', { style: styles.drillStack, children: [
     jsxs('div', { style: styles.drillHead, children: [
@@ -1670,13 +1753,18 @@ function FleetDetail({ api, campaignId }) {
     }) : null,
     children.length ? jsxs('div', { style: styles.drillStack, children: [
       jsx('div', { style: styles.drillLabel, children: 'Children' }),
-      ...children.map((child, index) => jsxs('div', { style: styles.childRow, children: [
-        jsx('span', { style: styles.listId, title: child.title || child.child_id, children: child.title || child.child_id || '?' }),
-        jsxs('span', { style: styles.taskMeta, children: [
-          Number(child.incarnation_count) > 1 ? jsx('span', { style: styles.taskAttempts, children: `×${child.incarnation_count}` }) : null,
-          child.archived ? jsx(Badge, { variant: 'outline', style: styles.metaBadge, children: 'archived' }) : null,
-          jsx(Badge, { variant: 'outline', style: { ...styles.metaBadge, color: COLORS.accent, borderColor: COLORS.accent }, children: child.role || 'child' })
-        ] })
+      ...children.map((child, index) => jsxs('div', { style: styles.childStack, children: [
+        jsxs('div', { style: styles.childRow, children: [
+          jsx('span', { style: styles.listId, title: child.title || child.child_id, children: child.title || child.child_id || '?' }),
+          jsxs('span', { style: styles.taskMeta, children: [
+            jsx(StateBadge, { value: child.status, tone: child.archived ? 'muted' : undefined }),
+            Number(child.incarnation_count) > 1 ? jsx('span', { style: styles.taskAttempts, children: `×${child.incarnation_count}` }) : null,
+            child.archived ? jsx(Badge, { variant: 'outline', style: styles.metaBadge, children: 'archived' }) : null,
+            jsx(Badge, { variant: 'outline', style: { ...styles.metaBadge, color: COLORS.accent, borderColor: COLORS.accent }, children: child.role || 'child' }),
+            jsx(ChildStatusMenu, { api, campaignId, child, onResult: handleStatusResult })
+          ] })
+        ] }),
+        statusFeedback ? jsx(FleetComposerFeedback, { feedback: statusFeedback, error: statusFeedbackError }) : null
       ] }, `child-${child.child_id || index}`))
     ] }) : null,
     activity.length ? jsxs('div', { style: styles.drillStack, children: [
@@ -1920,6 +2008,107 @@ function AttachChildComposer({ api, campaignId }) {
     }),
     jsx(FleetComposerFeedback, { feedback, error: feedbackError })
   ] })
+}
+
+// --- Memory browser ---------------------------------------------------------
+// Browse (not search) view over the memory fabric: tier/status toggle filters
+// plus an Enter-to-submit free-text query. Rank-weighted retrieval lives in
+// RecallCard; this surface only lists records. Previous data is kept while a
+// refetch is in flight (placeholderData keeps the old page rendered) so the
+// list does not flicker between polls.
+const MEMORY_TIERS = ['work', 'knowledge', 'learning']
+const MEMORY_STATUSES = ['active', 'candidate', 'archived']
+
+function memoryBrowsePath({ tier, status, query }) {
+  const params = new URLSearchParams()
+  if (tier) params.set('tier', tier)
+  if (status) params.set('status', status)
+  const trimmed = String(query || '').trim()
+  if (trimmed) params.set('query', trimmed)
+  const qs = params.toString()
+  return qs ? `/memory?${qs}` : '/memory'
+}
+
+function MemoryFilterGroup({ label, options, value, onChange, disabled }) {
+  return jsxs('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '5px' }, children: [
+    jsx('span', { style: styles.drillLabel, children: label }),
+    jsx('span', { style: styles.memoryFilters, children: ['all', ...options].map((option) => jsx(Button, {
+      key: option,
+      variant: value === option ? 'solid' : 'outline',
+      size: 'sm',
+      disabled,
+      onClick: () => onChange(option),
+      style: { minHeight: '24px', padding: '0 9px', fontSize: '12px' },
+      children: option === 'all' ? 'All' : option
+    }, option)) })
+  ] })
+}
+
+function MemoryBrowser({ api }) {
+  const [tier, setTier] = useState('all')
+  const [status, setStatus] = useState('all')
+  const [queryDraft, setQueryDraft] = useState('')
+  const [query, setQuery] = useState('')
+  const memoryQuery = useQuery({
+    queryKey: ['sips-control-plane', 'memory', tier, status, query],
+    queryFn: () => api.rest(memoryBrowsePath({ tier, status, query })),
+    placeholderData: (previous) => previous,
+    refetchInterval: 60000
+  })
+
+  if (memoryQuery.isLoading) {
+    return jsx(Card, { title: 'Memory', icon: 'database', children: jsx('div', { style: styles.unavailable, children: 'Reading the memory fabric…' }) })
+  }
+  const memory = memoryQuery.data
+  if (!memory?.available) {
+    return jsx(Card, {
+      title: 'Memory',
+      icon: 'database',
+      hint: 'Browse the SIPS memory fabric; ranked retrieval lives in the recall card.',
+      children: jsx('div', { style: styles.unavailable, children: memory?.reason || 'Memory fabric is unavailable.' })
+    })
+  }
+
+  const records = memory.records || []
+  const totalRecords = Number(memory.total_records) || 0
+  const totalMatched = Number(memory.total_matched) || 0
+  const filtersActive = tier !== 'all' || status !== 'all' || Boolean(query.trim())
+  const submitQuery = () => setQuery(queryDraft.trim())
+
+  return jsx(Card, {
+    title: `Memory · ${compactNumber(totalRecords)}`,
+    icon: 'database',
+    hint: memory.claim_boundary || 'Browse the SIPS memory fabric; ranked retrieval lives in the recall card.',
+    children: [
+      jsxs('div', { style: styles.memoryFilters, children: [
+        jsx(MemoryFilterGroup, { label: 'Tier', options: MEMORY_TIERS, value: tier, onChange: setTier, disabled: memoryQuery.isFetching && !memoryQuery.isLoading }),
+        jsx(MemoryFilterGroup, { label: 'Status', options: MEMORY_STATUSES, value: status, onChange: setStatus, disabled: memoryQuery.isFetching && !memoryQuery.isLoading }),
+        jsx('input', {
+          style: styles.input,
+          value: queryDraft,
+          placeholder: 'Filter by text (Enter)…',
+          'aria-label': 'Memory browse query',
+          onChange: (event) => setQueryDraft(event.target.value),
+          onKeyDown: (event) => { if (event.key === 'Enter') submitQuery() }
+        })
+      ] }),
+      records.length ? jsxs('div', { style: { marginTop: '8px' }, children: [
+        records.map((record, index) => jsxs('div', { style: styles.listRow, children: [
+          jsxs('div', { style: styles.listMain, children: [
+            jsx('span', { style: styles.listId, title: record.title, children: record.title || record.id || '?' }),
+            jsxs('span', { style: styles.listMeta, children: [
+              jsx(StateBadge, { value: record.tier }),
+              jsx(StateBadge, { value: record.status, tone: record.status === 'active' ? 'good' : record.status === 'archived' ? 'muted' : 'warn' }),
+              jsx('span', { style: styles.eventTime, children: formatRelativeTimestamp(record.created_at) })
+            ] })
+          ] }),
+          record.preview ? jsx('div', { style: styles.listSecondary, title: record.preview, children: record.preview }) : null
+        ] }, `memory-${record.id || index}`))
+      ] }) : jsx('div', { style: { ...styles.unavailable, marginTop: '8px' }, children: filtersActive ? 'No records match the current filters.' : 'The memory fabric has no records yet.' }),
+      filtersActive ? jsx('div', { style: styles.memoryMatched, children: `matched ${compactNumber(totalMatched)} of ${compactNumber(totalRecords)}` }) : null,
+      memoryQuery.isFetching && !memoryQuery.isLoading ? jsx('div', { style: { ...styles.memoryMatched, marginTop: '2px' }, children: 'Refreshing…' }) : null
+    ]
+  })
 }
 
 function FleetCard({ api }) {
@@ -2298,6 +2487,7 @@ function Dashboard({ api }) {
           jsx(RuntimeCard, { api }),
           jsx(RunsCard, { api }),
           jsx(FleetCard, { api }),
+          jsx(MemoryBrowser, { api }),
           jsx(MemoryCard, { memory: data.memory }),
           jsx(SurfaceCard, { counts })
         ] })

@@ -293,6 +293,52 @@ def test_fleet_attach_unknown_campaign_degrades(sips_home: Path, monkeypatch: py
     assert result["reason"] == "campaign_not_found"
 
 
+def test_memory_browse_filters_and_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """/memory: newest-first, tier/status/query filters, limit clamp."""
+    monkeypatch.setattr(plugin_api, "load_records", lambda: [
+        {"id": "mem_a", "title": "Alpha lesson", "tier": "learning", "status": "active", "confidence": "high", "tags": ["t1"], "scope": "/tmp", "created_at": "2026-08-28T01:00:00+00:00", "body": "alpha body"},
+        {"id": "mem_b", "title": "Beta work", "tier": "work", "status": "candidate", "confidence": "medium", "tags": [], "scope": "/tmp", "created_at": "2026-08-28T02:00:00+00:00", "body": "beta body"},
+        {"id": "mem_c", "title": "Gamma archived", "tier": "learning", "status": "archived", "confidence": "low", "tags": [], "scope": "/tmp", "created_at": "2026-08-27T00:00:00+00:00", "body": "gamma"},
+    ])
+
+    view = plugin_api.get_memory()
+    assert view["available"] is True
+    assert view["total_matched"] == 3
+    assert [r["id"] for r in view["records"]] == ["mem_b", "mem_a", "mem_c"]  # newest first
+    assert plugin_api.get_memory(tier="learning")["total_matched"] == 2
+    assert plugin_api.get_memory(status="archived")["records"][0]["id"] == "mem_c"
+    assert [r["id"] for r in plugin_api.get_memory(query="beta")["records"]] == ["mem_b"]
+    assert len(plugin_api.get_memory(limit=1)["records"]) == 1
+
+
+def test_memory_browse_rejects_bad_filters() -> None:
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as e1:
+        plugin_api.get_memory(tier="bogus")
+    assert e1.value.status_code == 422
+    with pytest.raises(HTTPException) as e2:
+        plugin_api.get_memory(status="nope")
+    assert e2.value.status_code == 422
+
+
+def test_fleet_child_status_write_and_validation(sips_home: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(plugin_api, "PLUGIN_ROOT", tmp_path)
+
+    plugin_api.post_fleet_create({"objective": "r5 test", "campaign_id": "child-status-1"})
+    plugin_api.post_fleet_attach({"campaign_id": "child-status-1", "title": "kid", "role": "Worker"})
+    child_id = plugin_api.get_fleet_campaign("child-status-1")["children"][0]["child_id"]
+
+    result = plugin_api.post_fleet_child_status({"campaign_id": "child-status-1", "child_id": child_id, "status": "blocked", "reason": "probe"})
+    assert result["available"] is True
+    assert result["status"] == "blocked"
+    assert result["revision"] == 3
+
+    # detail now reflects the new status
+    detail = plugin_api.get_fleet_campaign("child-status-1")
+    assert detail["children"][0]["status"] == "blocked"
+
+
 def test_fleet_campaign_detail_rejects_traversal() -> None:
     from fastapi import HTTPException
 
