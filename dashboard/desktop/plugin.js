@@ -1598,6 +1598,67 @@ function compactBudgets(budgets, usage) {
     .join(' · ')
 }
 
+// --- Run annotator ----------------------------------------------------------
+// Compact label affordance in the expanded run panel: the newest label shows
+// as a badge next to the status; a one-line input (Enter or Add) POSTs the
+// annotation. Input clears and shows brief inline feedback on success only —
+// the text stays for correction when the write fails.
+function RunAnnotator({ api, runId, label }) {
+  const [draft, setDraft] = useState('')
+  const [feedback, setFeedback] = useState(null)
+  const [feedbackError, setFeedbackError] = useState(false)
+  const queryClient = useQueryClient()
+  const mutation = useSipsMutation(api, {
+    invalidateKeys: ['runs'],
+    onSuccess: (result) => {
+      if (result?.available) {
+        setFeedback(`Labeled "${result.label}"`)
+        setFeedbackError(false)
+        setDraft('')
+      } else {
+        setFeedback(`Annotate failed: ${result?.reason || 'unknown reason'}`)
+        setFeedbackError(true)
+      }
+      // useSipsMutation's string invalidateKeys cover the runs list; the
+      // run-scoped detail key needs the full array, invalidated explicitly.
+      queryClient.invalidateQueries({ queryKey: ['sips-control-plane', 'run-detail', runId] })
+    },
+    onError: (error) => {
+      setFeedback(`Annotate failed: ${error.message || 'unknown error'}`)
+      setFeedbackError(true)
+    }
+  })
+  const busy = mutation.isPending || mutation.isLoading
+  const submit = () => {
+    const trimmed = draft.trim()
+    if (!trimmed || busy) return
+    setFeedback(null)
+    setFeedbackError(false)
+    mutation.mutate({ path: `/runs/${encodeURIComponent(runId)}/annotate`, body: { label: trimmed } })
+  }
+
+  return jsxs('div', { style: styles.drillStack, children: [
+    jsxs('div', { style: styles.controlRow, children: [
+      jsx('input', {
+        style: styles.input,
+        value: draft,
+        placeholder: 'Label this run…',
+        'aria-label': 'Annotate run label',
+        onChange: (event) => setDraft(event.target.value),
+        onKeyDown: (event) => { if (event.key === 'Enter') submit() }
+      }),
+      jsx(Button, {
+        variant: 'outline',
+        size: 'sm',
+        disabled: busy || !draft.trim(),
+        onClick: submit,
+        children: busy ? 'Adding…' : 'Add'
+      })
+    ] }),
+    feedback ? jsx(FleetComposerFeedback, { feedback, error: feedbackError }) : null
+  ] })
+}
+
 function RunDetail({ api, runId }) {
   const query = useQuery({
     queryKey: ['sips-control-plane', 'run-detail', runId],
@@ -1619,10 +1680,12 @@ function RunDetail({ api, runId }) {
   const events = (detail.events || []).slice() // chronological; most recent last
 
   return jsxs('div', { style: styles.drillStack, children: [
-    jsx('div', { style: styles.drillHead, children: [
+    jsxs('div', { style: styles.drillHead, children: [
       jsx(StateBadge, { value: detail.status, tone: runStatusTone(detail.status) }),
+      detail.label ? jsx(Badge, { variant: 'outline', style: { ...styles.metaBadge, color: COLORS.accent, borderColor: COLORS.accent }, children: detail.label }) : null,
       detail.objective ? jsx('span', { style: styles.drillObjective, title: detail.objective, children: detail.objective }) : null
     ] }),
+    jsx(RunAnnotator, { api, runId, label: detail.label }),
     detail.revision !== undefined ? jsx('div', { style: styles.drillMeta, children: `revision ${detail.revision}` }) : null,
     detail.workspace_root ? jsx('div', { style: styles.drillMeta, title: detail.workspace_root, children: truncateMiddle(detail.workspace_root) }) : null,
     budgetsLine ? jsx('div', { style: styles.drillMeta, children: budgetsLine }) : null,
@@ -1646,6 +1709,26 @@ function RunDetail({ api, runId }) {
   ] })
 }
 
+// Shared dismissal for dropdown menus: Escape closes, and a mousedown outside
+// the ref'd container closes without swallowing that click. Dependency-free.
+function useDismissable(open, onClose) {
+  const containerRef = useRef(null)
+  useEffect(() => {
+    if (!open) return undefined
+    const onKeyDown = (event) => { if (event.key === 'Escape') onClose() }
+    const onMouseDown = (event) => {
+      if (containerRef.current && event.target instanceof Node && !containerRef.current.contains(event.target)) onClose()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    document.addEventListener('mousedown', onMouseDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      document.removeEventListener('mousedown', onMouseDown)
+    }
+  }, [open, onClose])
+  return containerRef
+}
+
 // --- Child status menu ------------------------------------------------------
 // Compact per-child status control in the expanded campaign panel: a small
 // pill button that opens a click-to-open dropdown of the most useful status
@@ -1663,6 +1746,7 @@ const CHILD_STATUS_ACTIONS = [
 function ChildStatusMenu({ api, campaignId, child, onResult }) {
   const [open, setOpen] = useState(false)
   const queryClient = useQueryClient()
+  const menuRef = useDismissable(open, () => setOpen(false))
   const mutation = useSipsMutation(api, {
     // useSipsMutation's string invalidateKeys cover the fleet list; the
     // campaign-scoped detail key needs the full array, invalidated explicitly.
@@ -1684,7 +1768,7 @@ function ChildStatusMenu({ api, campaignId, child, onResult }) {
     mutation.mutate({ path: '/fleet/child-status', body: { campaign_id: campaignId, child_id: child.child_id, status } })
   }
 
-  return jsxs('span', { style: styles.childStatusWrap, children: [
+  return jsxs('span', { ref: menuRef, style: styles.childStatusWrap, children: [
     jsx('button', {
       type: 'button',
       'aria-label': `Status actions for ${child.title || child.child_id}`,
@@ -1700,6 +1784,87 @@ function ChildStatusMenu({ api, campaignId, child, onResult }) {
     open ? jsxs('span', { style: styles.childStatusMenu, role: 'menu', children: [
       ...CHILD_STATUS_ACTIONS.map((action) => {
         const current = action.status === child.status || (action.status === 'archived' && child.archived)
+        return jsx('button', {
+          type: 'button',
+          role: 'menuitem',
+          key: action.status,
+          disabled: busy || current,
+          onClick: () => set(action.status),
+          style: { ...styles.childStatusOption, ...(current ? styles.childStatusOptionCurrent : {}), ...(action.destructive ? styles.childStatusOptionDanger : {}) },
+          children: `${action.label}${current ? ' · current' : ''}`
+        }, action.status)
+      })
+    ] }) : null
+  ] })
+}
+
+// --- Campaign status menu ---------------------------------------------------
+// Campaign-level mirror of ChildStatusMenu: a small gear pill on the FleetCard
+// list rows that opens the 4 campaign statuses. The current one is marked
+// '· current' and disabled; 'Archived' is styled destructive. Server-side
+// transition rules decide validity — the menu always offers all 4 and surfaces
+// rejection reasons via the local mapping below.
+const CAMPAIGN_STATUS_ACTIONS = [
+  { status: 'active', label: 'Set active' },
+  { status: 'completed', label: 'Set completed' },
+  { status: 'archived', label: 'Archived', destructive: true },
+  { status: 'abandoned', label: 'Set abandoned' }
+]
+
+// Campaign status write rejections read as guidance, not enum text.
+const CAMPAIGN_STATUS_REASON_TEXT = {
+  campaign_not_found: 'This campaign no longer exists. Refresh the fleet list.',
+  campaign_has_open_children: 'Complete/archive the open children first.',
+  campaign_id_invalid: 'Campaign id is invalid.'
+}
+
+function campaignStatusReasonText(result, error) {
+  if (error) return `Fleet write failed: ${error.message || 'unknown error'}`
+  const reason = result?.reason
+  const mapped = reason && CAMPAIGN_STATUS_REASON_TEXT[reason]
+  if (result && result.available === false) return `Fleet write failed: ${reason?.startsWith('transition_invalid') ? 'That status change is not allowed from the current status.' : mapped || reason}`
+  return `Fleet write failed: ${mapped || reason || 'unknown reason'}`
+}
+
+function CampaignStatusMenu({ api, campaign, onResult }) {
+  const [open, setOpen] = useState(false)
+  const queryClient = useQueryClient()
+  const menuRef = useDismissable(open, () => setOpen(false))
+  const mutation = useSipsMutation(api, {
+    invalidateKeys: ['fleet'],
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['sips-control-plane', 'fleet-detail', campaign.campaign_id] })
+      setOpen(false)
+      if (!result?.available) onResult(campaignStatusReasonText(result), true)
+    },
+    onError: (error) => {
+      setOpen(false)
+      onResult(campaignStatusReasonText(null, error), true)
+    }
+  })
+  const busy = mutation.isPending || mutation.isLoading
+  const set = (status) => {
+    if (busy || status === campaign.status) return
+    onResult(null, false)
+    mutation.mutate({ path: '/fleet/campaign-status', body: { campaign_id: campaign.campaign_id, status } })
+  }
+
+  return jsxs('span', { ref: menuRef, style: styles.childStatusWrap, children: [
+    jsx('button', {
+      type: 'button',
+      'aria-label': `Status actions for campaign ${campaign.campaign_id || ''}`,
+      'aria-expanded': open,
+      disabled: busy,
+      onClick: () => setOpen((value) => !value),
+      style: { ...styles.childStatusBtn, ...(open ? { color: COLORS.text, borderColor: COLORS.accent } : {}) },
+      children: [
+        jsx(Codicon, { name: 'settings', size: '0.75rem' }),
+        busy ? '…' : null
+      ]
+    }),
+    open ? jsxs('span', { style: styles.childStatusMenu, role: 'menu', children: [
+      ...CAMPAIGN_STATUS_ACTIONS.map((action) => {
+        const current = action.status === campaign.status
         return jsx('button', {
           type: 'button',
           role: 'menuitem',
@@ -1813,7 +1978,7 @@ function RunsCard({ api }) {
         detail: jsx(RunDetail, { api, runId: run.run_id || `run-${index}` }),
         children: [
           jsx('div', { style: styles.listMain, children: [
-            jsx('span', { style: styles.listId, title: run.run_id, children: run.run_id || '?' }),
+            jsx('span', { style: styles.listId, title: run.label ? `${run.label} (${run.run_id})` : run.run_id, children: run.label ? `${run.label} · ${run.run_id || '?'}` : run.run_id || '?' }),
             jsxs('span', { style: styles.listMeta, children: [
               jsx('span', { style: { ...styles.value, fontVariantNumeric: 'tabular-nums' }, children: `${run.events ?? 0} events` }),
               jsx(StateBadge, { value: run.status, tone: runStatusTone(run.status) }),
@@ -2114,6 +2279,12 @@ function MemoryBrowser({ api }) {
 function FleetCard({ api }) {
   const query = useQuery({ queryKey: ['sips-control-plane', 'fleet'], queryFn: () => api.rest('/fleet'), refetchInterval: 30000 })
   const [expandedId, setExpandedId] = useState(null)
+  const [statusFeedback, setStatusFeedback] = useState(null)
+  const [statusFeedbackError, setStatusFeedbackError] = useState(false)
+  const handleStatusResult = (message, isError) => {
+    setStatusFeedback(message)
+    setStatusFeedbackError(Boolean(isError))
+  }
   const toggleExpanded = (id) => setExpandedId((current) => (current === id ? null : id))
 
   if (query.isLoading) {
@@ -2150,11 +2321,13 @@ function FleetCard({ api }) {
                 `${campaign.child_count ?? 0} child${Number(campaign.child_count) === 1 ? '' : 'ren'}`,
                 Number(campaign.archived_child_count) > 0 ? ` · ${campaign.archived_child_count} archived` : null
               ] }),
-              jsx(StateBadge, { value: campaign.status })
+              jsx(StateBadge, { value: campaign.status }),
+              jsx(CampaignStatusMenu, { api, campaign, onResult: handleStatusResult })
             ] })
           ] }),
           campaign.objective ? jsx('div', { style: styles.listSecondary, title: campaign.objective, children: campaign.objective }) : null,
-          (campaign.tags || []).length ? jsx('div', { style: styles.listTags, children: campaign.tags.map((tag) => jsx(Badge, { key: tag, variant: 'outline', style: styles.metaBadge, children: tag })) }) : null
+          (campaign.tags || []).length ? jsx('div', { style: styles.listTags, children: campaign.tags.map((tag) => jsx(Badge, { key: tag, variant: 'outline', style: styles.metaBadge, children: tag })) }) : null,
+          statusFeedback ? jsx(FleetComposerFeedback, { feedback: statusFeedback, error: statusFeedbackError }) : null
         ]
       }, `campaign-${campaign.campaign_id || index}`)) : jsx('div', { style: styles.unavailable, children: 'No campaigns yet — create one with New Campaign above, or wait for fleet spines to appear.' })
     })

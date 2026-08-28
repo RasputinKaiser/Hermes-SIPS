@@ -339,6 +339,75 @@ def test_fleet_child_status_write_and_validation(sips_home: Path, monkeypatch: p
     assert detail["children"][0]["status"] == "blocked"
 
 
+def test_run_annotate_roundtrip(sips_home: Path, tmp_path: Path) -> None:
+    """Annotations persist beside the event store and surface in list+detail."""
+    import subprocess
+
+    env = dict(os.environ, SIPS_HOME=str(sips_home))
+    cli = str(_REPO_ROOT / "scripts" / "sips_runtime.py")
+    subprocess.run(
+        ["python3", cli, "write", "--op", "create", "--json", json.dumps({
+            "run_id": "h-ann", "objective": "annotate me", "idempotency_key": "k1", "expected_revision": 0,
+            "tasks": [{"id": "t1", "objective": "t", "estimated_tokens": 50000, "retry_limit": 3,
+                       "resource_estimates": {"tool_calls": 16, "retrieval_tokens": 512}}],
+            "soft_budget": 200000, "hard_budget": 400000,
+        })],
+        check=True, env=env, capture_output=True, text=True,
+    )
+
+    first = plugin_api.post_run_annotate("h-ann", {"label": "First pass"})
+    assert first["available"] is True
+    assert first["label"] == "First pass"
+    second = plugin_api.post_run_annotate("h-ann", {"label": "Second pass"})
+    assert second["available"] is True
+    assert len(second["labels"]) == 2
+
+    detail = plugin_api.get_run_detail("h-ann")
+    assert [l["label"] for l in detail["labels"]] == ["First pass", "Second pass"]
+    row = next(r for r in plugin_api.get_runs()["runs"] if r["run_id"] == "h-ann")
+    assert row["label"] == "Second pass"  # newest label wins in the list
+
+    missing = plugin_api.post_run_annotate("h-nope", {"label": "x"})
+    assert missing["available"] is False
+    assert missing["reason"] == "run_not_found"
+
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as excinfo:
+        plugin_api.post_run_annotate("h-ann", {"label": ""})
+    assert excinfo.value.status_code == 422
+
+
+def test_campaign_status_write_and_open_children_guard(sips_home: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(plugin_api, "PLUGIN_ROOT", tmp_path)
+
+    plugin_api.post_fleet_create({"objective": "campaign status test", "campaign_id": "camp-status-1"})
+    result = plugin_api.post_fleet_campaign_status({"campaign_id": "camp-status-1", "status": "abandoned", "reason": "test"})
+    assert result["available"] is True
+    assert result["status"] == "abandoned"
+
+    # reopen
+    reopen = plugin_api.post_fleet_campaign_status({"campaign_id": "camp-status-1", "status": "active"})
+    assert reopen["available"] is True
+    assert reopen["status"] == "active"
+
+    # completing with open children is rejected by the registry
+    plugin_api.post_fleet_attach({"campaign_id": "camp-status-1", "title": "open kid", "role": "Worker"})
+    blocked = plugin_api.post_fleet_campaign_status({"campaign_id": "camp-status-1", "status": "completed"})
+    assert blocked["available"] is False
+    assert blocked["reason"] == "campaign_has_open_children"
+
+    missing = plugin_api.post_fleet_campaign_status({"campaign_id": "no-such", "status": "archived"})
+    assert missing["available"] is False
+    assert missing["reason"] == "campaign_not_found"
+
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as excinfo:
+        plugin_api.post_fleet_campaign_status({"campaign_id": "camp-status-1", "status": "quantum"})
+    assert excinfo.value.status_code == 422
+
+
 def test_fleet_campaign_detail_rejects_traversal() -> None:
     from fastapi import HTTPException
 

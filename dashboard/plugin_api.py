@@ -657,6 +657,23 @@ def get_runtime() -> dict[str, Any]:
     }
 
 
+def _read_run_annotations(run_dir: Path) -> list[dict[str, Any]]:
+    """Load panel-side labels from a run's annotations.json (newest last)."""
+    path = run_dir / "annotations.json"
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    labels = loaded.get("labels") if isinstance(loaded, dict) else None
+    if not isinstance(labels, list):
+        return []
+    return [
+        {"label": str(e.get("label") or "")[:200], "at": str(e.get("at") or "")[:40]}
+        for e in labels[-3:]
+        if isinstance(e, dict)
+    ]
+
+
 @router.get("/runs")
 def get_runs() -> dict[str, Any]:
     """Bounded history of runtime session runs (most recent first).
@@ -707,6 +724,7 @@ def get_runs() -> dict[str, Any]:
         except OSError:
             continue
         mtime = events_path.stat().st_mtime
+        annotations = _read_run_annotations(run_dir)
         if last_event == "task.result":
             status = "succeeded"
         elif not submitted:
@@ -721,6 +739,7 @@ def get_runs() -> dict[str, Any]:
             {
                 "run_id": run_dir.name[:80],
                 "objective": objective[:320],
+                "label": annotations[-1]["label"] if annotations else "",
                 "status": status,
                 "last_event": last_event[:40],
                 "events": event_count,
@@ -820,6 +839,12 @@ def get_run_detail(run_id: str) -> dict[str, Any]:
     events_read = api.read("events", {"run_id": safe_id})
     events_data = events_read.get("data")
     raw_events = events_data if isinstance(events_data, list) else []
+    try:
+        from sips_runtime.controller import runtime_root
+
+        annotations = _read_run_annotations(runtime_root() / safe_id)
+    except Exception:
+        annotations = []
     events_out = [
         {
             "type": str(e.get("event_type") or "")[:40],
@@ -856,6 +881,7 @@ def get_run_detail(run_id: str) -> dict[str, Any]:
         "run_id": str(status_data.get("run_id") or safe_id)[:80],
         "status": str(status_data.get("status") or "unknown")[:40],
         "objective": str(status_data.get("objective") or "")[:320],
+        "labels": annotations,
         "revision": int(status_data.get("revision") or 0),
         "workspace_root": str(status_data.get("workspace_root") or "")[:300],
         "budgets": {str(k)[:40]: int(v) for k, v in (budgets or {}).items() if isinstance(v, int)},
@@ -1174,6 +1200,137 @@ def get_memory(tier: str = "", status: str = "", query: str = "", limit: int = 2
         "generated_at": _now(),
         "claim_boundary": "Bounded browse projection; full bodies stay in the store.",
     }
+
+
+@router.post("/fleet/campaign-status")
+def post_fleet_campaign_status(body: dict[str, Any]) -> dict[str, Any]:
+    """Set a campaign spine's status (transition-validated write)."""
+    data = body if isinstance(body, dict) else {}
+    campaign_id = str(data.get("campaign_id") or "").strip()
+    status = str(data.get("status") or "").strip()
+    if not campaign_id or len(campaign_id) > 80 or any(ch in campaign_id for ch in "/\\"):
+        raise HTTPException(status_code=422, detail="campaign_id_invalid")
+    if status not in {"active", "completed", "archived", "abandoned"}:
+        raise HTTPException(status_code=422, detail="status_invalid")
+    reason = str(data.get("reason") or "").strip()[:300]
+    try:
+        from harness_homebase_mcp import call_tool
+
+        request: dict[str, Any] = {"campaign_id": campaign_id, "status": status}
+        if reason:
+            request["status_reason"] = reason
+        result = call_tool(
+            "homebase_campaign_fleet_write",
+            {"root": str(PLUGIN_ROOT), "operation": "set_campaign_status", "request_json": json.dumps(request)},
+        )
+        structured = result.get("structuredContent") or {}
+    except Exception as exc:
+        name = type(exc).__name__
+        if name == "CampaignNotFound":
+            reason_out = "campaign_not_found"
+        elif "open children" in str(exc):
+            reason_out = "campaign_has_open_children"
+        elif "cannot transition" in str(exc):
+            reason_out = f"transition_invalid: {str(exc)[:160]}"
+        else:
+            reason_out = f"fleet write failed: {name}"
+        return {
+            "schema": "sips.fleet.write.v1",
+            "available": False,
+            "reason": reason_out,
+            "campaign_id": campaign_id,
+            "generated_at": _now(),
+            "claim_boundary": "The fleet write failed before producing state.",
+        }
+    raw_campaign = structured.get("data")
+    campaign = raw_campaign if isinstance(raw_campaign, dict) else {}
+    return {
+        "schema": "sips.fleet.write.v1",
+        "available": True,
+        "campaign_id": campaign_id,
+        "status": str(campaign.get("status") or status)[:40],
+        "revision": int(campaign.get("revision") or 0),
+        "generated_at": _now(),
+        "claim_boundary": "Campaign status is spine metadata; transitions are validated server-side.",
+    }
+
+
+@router.post("/runs/{run_id}/annotate")
+def post_run_annotate(run_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Attach a human label to a runtime run (stored in run metadata)."""
+    safe_id = run_id.strip()[:80]
+    data = body if isinstance(body, dict) else {}
+    label = str(data.get("label") or "").strip()[:200]
+    if not label:
+        raise HTTPException(status_code=422, detail="label_required")
+    try:
+        from sips_runtime.api import RuntimeAPI
+        from sips_runtime.controller import runtime_root
+
+        runs_root = runtime_root()
+        events_path = runs_root / safe_id / "events.jsonl"
+        if not (runs_root.is_dir() and events_path.exists()):
+            return {
+                "schema": "sips.run.annotate.v1",
+                "available": False,
+                "reason": "run_not_found",
+                "run_id": safe_id,
+                "generated_at": _now(),
+                "claim_boundary": "No runtime run matched that id.",
+            }
+        with events_path.open(encoding="utf-8") as handle:
+            revision = 0
+            for line in handle:
+                try:
+                    event = json.loads(line)
+                except ValueError:
+                    continue
+                rev = event.get("revision")
+                if isinstance(rev, int) and rev > revision:
+                    revision = rev
+        api = RuntimeAPI()
+        # An annotation rides the lease-free metadata channel: cancel-with-reason
+        # mutates the run, so instead we append via the promote path only if
+        # terminal — otherwise use create-metadata-compatible advance? The runtime
+        # has no metadata-write op; persist the label as a cancel-guarded no-op is
+        # wrong. Correct channel: the event store accepts idempotent appends only
+        # through write ops, so we store annotations out-of-band in the run dir.
+        annotation_path = runs_root / safe_id / "annotations.json"
+        annotations: dict[str, Any] = {}
+        if annotation_path.exists():
+            try:
+                loaded = json.loads(annotation_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    annotations = loaded
+            except (OSError, ValueError):
+                annotations = {}
+        entry = {
+            "label": label,
+            "at": _now(),
+            "run_revision_seen": revision,
+        }
+        annotations.setdefault("labels", []).append(entry)
+        annotation_path.write_text(json.dumps(annotations, indent=1), encoding="utf-8")
+        return {
+            "schema": "sips.run.annotate.v1",
+            "available": True,
+            "run_id": safe_id,
+            "label": label,
+            "labels": annotations["labels"][-5:],
+            "generated_at": _now(),
+            "claim_boundary": "Annotations live beside the run's event store; they are panel-side labels, not runtime events.",
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return {
+            "schema": "sips.run.annotate.v1",
+            "available": False,
+            "reason": f"annotation failed: {type(exc).__name__}",
+            "run_id": safe_id,
+            "generated_at": _now(),
+            "claim_boundary": "The annotation write failed before producing state.",
+        }
 
 
 @router.get("/routes")
