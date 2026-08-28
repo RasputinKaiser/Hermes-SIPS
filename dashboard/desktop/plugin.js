@@ -351,6 +351,8 @@ const styles = {
   taskRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', minWidth: 0 },
   taskMeta: { display: 'inline-flex', alignItems: 'center', gap: '8px', flexShrink: 0 },
   taskAttempts: { color: COLORS.muted, fontSize: '12px', fontVariantNumeric: 'tabular-nums', flexShrink: 0 },
+  taskGateChip: { display: 'inline-flex', alignItems: 'center', flexShrink: 0, fontSize: '11px', lineHeight: 1, border: `1px solid ${COLORS.border}`, borderRadius: '999px', padding: '0 7px', minHeight: '20px', fontVariantNumeric: 'tabular-nums' },
+  taskLessonChip: { display: 'inline-flex', alignItems: 'center', gap: '4px', flexShrink: 0, fontSize: '11px', lineHeight: 1, color: COLORS.accent, border: `1px solid ${COLORS.border}`, borderRadius: '999px', padding: '0 7px', minHeight: '20px' },
   eventRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '10px', minWidth: 0 },
   eventType: { fontSize: '12px', fontWeight: 650, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   childRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', minWidth: 0 },
@@ -1723,7 +1725,17 @@ function RunDetail({ api, runId }) {
           jsx('span', { style: styles.listId, title: task.objective || task.id, children: task.objective || task.id || '?' }),
           jsxs('span', { style: styles.taskMeta, children: [
             jsx(StateBadge, { value: task.status }),
-            Number(task.attempts) > 0 ? jsx('span', { style: styles.taskAttempts, children: `${task.attempts} attempt${Number(task.attempts) === 1 ? '' : 's'}` }) : null
+            Number(task.attempts) > 0 ? jsx('span', { style: styles.taskAttempts, children: `${task.attempts} attempt${Number(task.attempts) === 1 ? '' : 's'}` }) : null,
+            task.gates && typeof task.gates === 'object' ? Object.entries(task.gates).slice(0, 6).map(([name, state]) => jsx('span', {
+              key: name,
+              title: `${name}: ${state}`,
+              style: { ...styles.taskGateChip, color: state === 'ok' ? COLORS.good : state === 'failed' ? COLORS.bad : COLORS.muted },
+              children: name
+            }, `gate-${task.id || index}-${name}`)) : null,
+            task.has_lesson ? jsxs('span', { style: styles.taskLessonChip, 'aria-label': 'Task receipt includes a lesson candidate', children: [
+              jsx(Codicon, { name: 'lightbulb', size: '0.7rem' }),
+              'lesson'
+            ] }, `lesson-${task.id || index}`) : null
           ] })
         ] }),
         task.answer ? jsx('div', { style: { ...styles.listSecondary, whiteSpace: 'normal', lineHeight: 1.45 }, title: task.answer, children: task.answer }) : null
