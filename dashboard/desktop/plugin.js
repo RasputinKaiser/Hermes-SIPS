@@ -365,6 +365,15 @@ const styles = {
   memoryMatched: { color: COLORS.muted, fontSize: '12px', fontVariantNumeric: 'tabular-nums', marginTop: '6px' }
 }
 
+// Adaptive polling: hidden windows and background panes don't need live data,
+// so queries stretch their interval 4x while document.hidden. Callers pass
+// their normal cadence; nothing changes while the panel is visible.
+function pollInterval(baseMs) {
+  try {
+    return typeof document !== 'undefined' && document.hidden ? baseMs * 4 : baseMs
+  } catch { return baseMs }
+}
+
 function toneFor(value) {
   const normalized = String(value || '').toLowerCase()
   if (['inspected', 'active', 'done', 'verified', 'connected', 'ready', 'healthy', 'ok', 'source_present'].includes(normalized)) return 'good'
@@ -1047,7 +1056,7 @@ function useSipsMutation(api, { invalidateKeys = [], onSuccess } = {}) {
 }
 
 function GoalSubtasks({ api }) {
-  const goalQuery = useQuery({ queryKey: ['sips-control-plane', 'goal'], queryFn: () => api.rest('/goal'), refetchInterval: 30000 })
+  const goalQuery = useQuery({ queryKey: ['sips-control-plane', 'goal'], queryFn: () => api.rest('/goal'), refetchInterval: pollInterval(30000) })
   const [newDescription, setNewDescription] = useState('')
   const [optimisticDone, setOptimisticDone] = useState({})
   const addMutation = useSipsMutation(api, { invalidateKeys: ['goal', 'status'] })
@@ -1369,7 +1378,7 @@ function RecordCard({ api, onRecorded }) {
 }
 
 function HistoryCard({ api }) {
-  const query = useQuery({ queryKey: ['sips-control-plane', 'action-history'], queryFn: () => api.rest('/action-history'), refetchInterval: 20000 })
+  const query = useQuery({ queryKey: ['sips-control-plane', 'action-history'], queryFn: () => api.rest('/action-history'), refetchInterval: pollInterval(20000) })
 
   if (query.isLoading) {
     return jsx(Card, { title: 'Verification history', icon: 'history', children: jsx('div', { style: styles.unavailable, children: 'Loading recorded runs…' }) })
@@ -1420,7 +1429,7 @@ function HistoryCard({ api }) {
 }
 
 function RoutesCard({ api }) {
-  const query = useQuery({ queryKey: ['sips-control-plane', 'routes'], queryFn: () => api.rest('/routes'), refetchInterval: 60000 })
+  const query = useQuery({ queryKey: ['sips-control-plane', 'routes'], queryFn: () => api.rest('/routes'), refetchInterval: pollInterval(60000) })
   const [copiedName, setCopiedName] = useState(null)
 
   const copyFallback = (route) => {
@@ -1493,7 +1502,7 @@ function MemoryCard({ memory }) {
 }
 
 function RuntimeCard({ api }) {
-  const query = useQuery({ queryKey: ['sips-control-plane', 'runtime'], queryFn: () => api.rest('/runtime'), refetchInterval: 20000 })
+  const query = useQuery({ queryKey: ['sips-control-plane', 'runtime'], queryFn: () => api.rest('/runtime'), refetchInterval: pollInterval(20000) })
 
   if (query.isLoading) {
     return jsx(Card, { title: 'Runtime goal board', icon: 'target', children: jsx('div', { style: styles.unavailable, children: 'Reading runtime runs…' }) })
@@ -1548,6 +1557,8 @@ function RuntimeCard({ api }) {
 function runStatusTone(status) {
   if (status === 'running') return 'accent'
   if (status === 'succeeded') return 'good'
+  if (status === 'stale') return 'warn'
+  if (status === 'failed') return 'bad'
   return 'muted'
 }
 
@@ -1665,8 +1676,16 @@ function RunDetail({ api, runId }) {
     queryFn: () => api.rest(`/runs/${encodeURIComponent(runId)}`),
     enabled: Boolean(runId),
     staleTime: 15000,
-    refetchInterval: 30000
+    refetchInterval: pollInterval(30000)
   })
+  const [copiedRunId, setCopiedRunId] = useState(false)
+  const copyRunId = () => {
+    if (!runId || !navigator.clipboard?.writeText) return
+    navigator.clipboard.writeText(runId).then(() => {
+      setCopiedRunId(true)
+      setTimeout(() => setCopiedRunId(false), 1500)
+    }).catch(() => { /* clipboard unavailable — id stays selectable in tooltips */ })
+  }
 
   if (query.isLoading) {
     return jsx('div', { style: { display: 'grid', placeItems: 'center', padding: '6px 0' }, children: jsx(Loader, { type: 'lemniscate-bloom' }) })
@@ -1682,21 +1701,32 @@ function RunDetail({ api, runId }) {
   return jsxs('div', { style: styles.drillStack, children: [
     jsxs('div', { style: styles.drillHead, children: [
       jsx(StateBadge, { value: detail.status, tone: runStatusTone(detail.status) }),
-      detail.label ? jsx(Badge, { variant: 'outline', style: { ...styles.metaBadge, color: COLORS.accent, borderColor: COLORS.accent }, children: detail.label }) : null,
+      jsx('button', {
+        type: 'button',
+        onClick: copyRunId,
+        title: runId,
+        'aria-label': `Copy run id ${runId}`,
+        style: { border: `1px solid ${COLORS.border}`, borderRadius: '6px', background: 'transparent', color: copiedRunId ? COLORS.good : COLORS.muted, fontSize: '11px', fontFamily: 'ui-monospace, monospace', padding: '1px 8px', cursor: navigator.clipboard ? 'pointer' : 'default', flexShrink: 0, fontVariantNumeric: 'tabular-nums' },
+        children: copiedRunId ? 'Copied' : truncateMiddle(runId, 20)
+      }),
+      (detail.labels || []).length ? jsx(Badge, { variant: 'outline', title: (detail.labels || []).map((entry) => entry.label).join(' · '), style: { ...styles.metaBadge, color: COLORS.accent, borderColor: COLORS.accent }, children: detail.labels[detail.labels.length - 1].label }) : null,
       detail.objective ? jsx('span', { style: styles.drillObjective, title: detail.objective, children: detail.objective }) : null
     ] }),
-    jsx(RunAnnotator, { api, runId, label: detail.label }),
+    jsx(RunAnnotator, { api, runId, label: (detail.labels || []).length ? detail.labels[detail.labels.length - 1].label : undefined }),
     detail.revision !== undefined ? jsx('div', { style: styles.drillMeta, children: `revision ${detail.revision}` }) : null,
     detail.workspace_root ? jsx('div', { style: styles.drillMeta, title: detail.workspace_root, children: truncateMiddle(detail.workspace_root) }) : null,
     budgetsLine ? jsx('div', { style: styles.drillMeta, children: budgetsLine }) : null,
     tasks.length ? jsxs('div', { style: styles.drillStack, children: [
       jsx('div', { style: styles.drillLabel, children: 'Tasks' }),
-      ...tasks.map((task, index) => jsxs('div', { style: styles.taskRow, children: [
-        jsx('span', { style: styles.listId, title: task.id, children: task.id || '?' }),
-        jsxs('span', { style: styles.taskMeta, children: [
-          jsx(StateBadge, { value: task.status }),
-          Number(task.attempts) > 0 ? jsx('span', { style: styles.taskAttempts, children: `${task.attempts} attempt${Number(task.attempts) === 1 ? '' : 's'}` }) : null
-        ] })
+      ...tasks.map((task, index) => jsxs('div', { style: styles.listRow, children: [
+        jsxs('div', { style: styles.taskRow, children: [
+          jsx('span', { style: styles.listId, title: task.objective || task.id, children: task.objective || task.id || '?' }),
+          jsxs('span', { style: styles.taskMeta, children: [
+            jsx(StateBadge, { value: task.status }),
+            Number(task.attempts) > 0 ? jsx('span', { style: styles.taskAttempts, children: `${task.attempts} attempt${Number(task.attempts) === 1 ? '' : 's'}` }) : null
+          ] })
+        ] }),
+        task.answer ? jsx('div', { style: { ...styles.listSecondary, whiteSpace: 'normal', lineHeight: 1.45 }, title: task.answer, children: task.answer }) : null
       ] }, `task-${task.id || index}`))
     ] }) : null,
     events.length ? jsxs('div', { style: styles.drillStack, children: [
@@ -1885,7 +1915,7 @@ function FleetDetail({ api, campaignId }) {
     queryFn: () => api.rest(`/fleet/${encodeURIComponent(campaignId)}`),
     enabled: Boolean(campaignId),
     staleTime: 15000,
-    refetchInterval: 30000
+    refetchInterval: pollInterval(30000)
   })
 
   if (query.isLoading) {
@@ -1929,6 +1959,7 @@ function FleetDetail({ api, campaignId }) {
             jsx(ChildStatusMenu, { api, campaignId, child, onResult: handleStatusResult })
           ] })
         ] }),
+        child.summary ? jsx('div', { style: { ...styles.listSecondary, whiteSpace: 'normal', lineHeight: 1.45 }, title: child.summary, children: child.summary }) : null,
         statusFeedback ? jsx(FleetComposerFeedback, { feedback: statusFeedback, error: statusFeedbackError }) : null
       ] }, `child-${child.child_id || index}`))
     ] }) : null,
@@ -1947,7 +1978,7 @@ function FleetDetail({ api, campaignId }) {
 }
 
 function RunsCard({ api }) {
-  const query = useQuery({ queryKey: ['sips-control-plane', 'runs'], queryFn: () => api.rest('/runs'), refetchInterval: 30000 })
+  const query = useQuery({ queryKey: ['sips-control-plane', 'runs'], queryFn: () => api.rest('/runs'), refetchInterval: pollInterval(30000) })
   const [expandedId, setExpandedId] = useState(null)
   const toggleExpanded = (id) => setExpandedId((current) => (current === id ? null : id))
 
@@ -1981,6 +2012,11 @@ function RunsCard({ api }) {
             jsx('span', { style: styles.listId, title: run.label ? `${run.label} (${run.run_id})` : run.run_id, children: run.label ? `${run.label} · ${run.run_id || '?'}` : run.run_id || '?' }),
             jsxs('span', { style: styles.listMeta, children: [
               jsx('span', { style: { ...styles.value, fontVariantNumeric: 'tabular-nums' }, children: `${run.events ?? 0} events` }),
+              run.progress?.total ? jsx('span', {
+                title: `${run.progress.succeeded} succeeded · ${run.progress.failed} failed · ${run.progress.active} active`,
+                style: { ...styles.value, fontVariantNumeric: 'tabular-nums', color: Number(run.progress.failed) > 0 ? COLORS.warn : COLORS.muted },
+                children: `${run.progress.succeeded}/${run.progress.total} tasks`
+              }) : null,
               jsx(StateBadge, { value: run.status, tone: runStatusTone(run.status) }),
               jsx('span', { style: styles.eventTime, children: formatRelativeTimestamp(run.updated_at) })
             ] })
@@ -2194,7 +2230,7 @@ function memoryBrowsePath({ tier, status, query }) {
   return qs ? `/memory?${qs}` : '/memory'
 }
 
-function MemoryFilterGroup({ label, options, value, onChange, disabled }) {
+function MemoryFilterGroup({ label, options, value, onChange, disabled, counts }) {
   return jsxs('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '5px' }, children: [
     jsx('span', { style: styles.drillLabel, children: label }),
     jsx('span', { style: styles.memoryFilters, children: ['all', ...options].map((option) => jsx(Button, {
@@ -2203,8 +2239,11 @@ function MemoryFilterGroup({ label, options, value, onChange, disabled }) {
       size: 'sm',
       disabled,
       onClick: () => onChange(option),
-      style: { minHeight: '24px', padding: '0 9px', fontSize: '12px' },
-      children: option === 'all' ? 'All' : option
+      title: option === 'all' ? 'Show every record' : `Show ${option} records`,
+      style: { minHeight: '24px', padding: '0 9px', fontSize: '12px', fontVariantNumeric: 'tabular-nums' },
+      children: option === 'all'
+        ? (counts && Number(counts.__all__) > 0 ? `All · ${counts.__all__}` : 'All')
+        : (counts && counts[option] !== undefined ? `${option} · ${counts[option]}` : option)
     }, option)) })
   ] })
 }
@@ -2218,7 +2257,7 @@ function MemoryBrowser({ api }) {
     queryKey: ['sips-control-plane', 'memory', tier, status, query],
     queryFn: () => api.rest(memoryBrowsePath({ tier, status, query })),
     placeholderData: (previous) => previous,
-    refetchInterval: 60000
+    refetchInterval: pollInterval(60000)
   })
 
   if (memoryQuery.isLoading) {
@@ -2238,6 +2277,10 @@ function MemoryBrowser({ api }) {
   const totalRecords = Number(memory.total_records) || 0
   const totalMatched = Number(memory.total_matched) || 0
   const filtersActive = tier !== 'all' || status !== 'all' || Boolean(query.trim())
+  // Filter-button counts come from the backend's full-store tallies, so each
+  // toggle shows how many records it would select before it is clicked.
+  const tierCounts = memory.tier_counts || {}
+  const statusCounts = memory.status_counts || {}
   const submitQuery = () => setQuery(queryDraft.trim())
 
   return jsx(Card, {
@@ -2246,8 +2289,8 @@ function MemoryBrowser({ api }) {
     hint: memory.claim_boundary || 'Browse the SIPS memory fabric; ranked retrieval lives in the recall card.',
     children: [
       jsxs('div', { style: styles.memoryFilters, children: [
-        jsx(MemoryFilterGroup, { label: 'Tier', options: MEMORY_TIERS, value: tier, onChange: setTier, disabled: memoryQuery.isFetching && !memoryQuery.isLoading }),
-        jsx(MemoryFilterGroup, { label: 'Status', options: MEMORY_STATUSES, value: status, onChange: setStatus, disabled: memoryQuery.isFetching && !memoryQuery.isLoading }),
+        jsx(MemoryFilterGroup, { label: 'Tier', options: MEMORY_TIERS, value: tier, onChange: setTier, disabled: memoryQuery.isFetching && !memoryQuery.isLoading, counts: { ...tierCounts, __all__: totalRecords } }),
+        jsx(MemoryFilterGroup, { label: 'Status', options: MEMORY_STATUSES, value: status, onChange: setStatus, disabled: memoryQuery.isFetching && !memoryQuery.isLoading, counts: { ...statusCounts, __all__: totalRecords } }),
         jsx('input', {
           style: styles.input,
           value: queryDraft,
@@ -2277,7 +2320,7 @@ function MemoryBrowser({ api }) {
 }
 
 function FleetCard({ api }) {
-  const query = useQuery({ queryKey: ['sips-control-plane', 'fleet'], queryFn: () => api.rest('/fleet'), refetchInterval: 30000 })
+  const query = useQuery({ queryKey: ['sips-control-plane', 'fleet'], queryFn: () => api.rest('/fleet'), refetchInterval: pollInterval(30000) })
   const [expandedId, setExpandedId] = useState(null)
   const [statusFeedback, setStatusFeedback] = useState(null)
   const [statusFeedbackError, setStatusFeedbackError] = useState(false)
@@ -2479,7 +2522,7 @@ function SurfaceCard({ counts }) {
 
 function SipsPulse({ api }) {
   const gateway = useValue(host.state.gateway)
-  const query = useQuery({ queryKey: ['sips-control-plane', 'status'], queryFn: () => api.rest(API_STATUS), refetchInterval: 15000 })
+  const query = useQuery({ queryKey: ['sips-control-plane', 'status'], queryFn: () => api.rest(API_STATUS), refetchInterval: pollInterval(15000) })
   const data = query.data
   const state = data?.status || (query.isError ? 'error' : 'loading')
   // Deep-link: unresolved posture lands the operator on Verification directly.
@@ -2520,11 +2563,11 @@ function SipsPulse({ api }) {
 }
 
 function Dashboard({ api }) {
-  const query = useQuery({ queryKey: ['sips-control-plane', 'status'], queryFn: () => api.rest(API_STATUS), refetchInterval: 15000 })
+  const query = useQuery({ queryKey: ['sips-control-plane', 'status'], queryFn: () => api.rest(API_STATUS), refetchInterval: pollInterval(15000) })
   const data = query.data
   const counts = data?.surface_counts || {}
   const actionState = useSipsActions(api, data, query.isError)
-  const selfloopQuery = useQuery({ queryKey: ['sips-control-plane', 'selfloop'], queryFn: () => api.rest('/selfloop'), refetchInterval: 30000 })
+  const selfloopQuery = useQuery({ queryKey: ['sips-control-plane', 'selfloop'], queryFn: () => api.rest('/selfloop'), refetchInterval: pollInterval(30000) })
   const [history, setHistory] = useState([])
 
   useEffect(() => {
