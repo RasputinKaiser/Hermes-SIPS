@@ -21,7 +21,15 @@ for _path in (str(_DASHBOARD), str(_REPO_ROOT / "scripts")):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-import plugin_api  # noqa: E402
+try:
+    import plugin_api  # noqa: E402
+except ImportError as _exc:  # pragma: no cover - fastapi absent in CI
+    if "fastapi" in str(_exc):
+        pytest.skip("fastapi not installed in this environment", allow_module_level=True)
+    raise
+
+if not hasattr(plugin_api, "router"):  # pragma: no cover - defensive
+    pytest.skip("fastapi not installed in this environment", allow_module_level=True)
 
 
 @pytest.fixture()
