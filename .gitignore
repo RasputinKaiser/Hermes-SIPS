@@ -7,3 +7,8 @@ __pycache__/
 *.tmp
 .claude/
 .pytest_cache/
+
+# Local runtime state — never publish
+state.yaml
+dashboard/action_history.jsonl
+dashboard/__pycache__/

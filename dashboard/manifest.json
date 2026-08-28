@@ -1,0 +1,14 @@
+{
+  "name": "harness-self-improvement",
+  "label": "SIPS Control Plane",
+  "description": "Interactive SIPS mission control: tabbed workspace with live selfloop control, goal subtask management, memory recall/record, verification history with proof movement, and health telemetry for Hermes Desktop.",
+  "icon": "Activity",
+  "version": "0.3.0",
+  "tab": {
+    "path": "/sips-control-plane",
+    "position": "after:skills",
+    "hidden": true
+  },
+  "entry": "dist/index.js",
+  "api": "plugin_api.py"
+}

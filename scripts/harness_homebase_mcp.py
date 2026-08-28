@@ -529,7 +529,10 @@ def status_payload(root: Path) -> dict[str, Any]:
     hooks = read_json(hooks_path)
     mcp = read_json(mcp_path)
     source_available = manifest_path.is_file() and mcp_path.is_file()
-    worktree_available = (root / ".git").exists()
+    # A Hermes plugin is commonly vendored outside a Git worktree. We still
+    # inspect and report the worktree layer in that case; git_summary() below
+    # separately records that no Git metadata is present.
+    worktree_available = root.exists() and source_available
     return {
         "schema": "homebase.status.v1",
         "status": "inspected" if source_available else "source_not_found",

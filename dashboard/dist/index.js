@@ -1,0 +1,1 @@
+/* The native Hermes Desktop runtime addon owns the visible SIPS surface. */

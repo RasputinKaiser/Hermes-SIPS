@@ -1,0 +1,43 @@
+name: harness-self-improvement
+version: 0.4.0
+category: self-improvement
+description: "SIPS Homebase for Hermes: bounded self-improvement, scoped memory recall, verification, delegation routing, task-graph state, and lifecycle automation."
+author: "RasputinKaiser"
+kind: standalone
+platforms:
+  - linux
+  - macos
+provides_tools:
+  - homebase_status
+  - homebase_verify
+  - homebase_route
+  - homebase_repo_map
+  - homebase_context_scan
+  - homebase_recall
+  - homebase_record
+  - homebase_goal
+  - homebase_selfloop
+  - homebase_routes
+  - homebase_mcp_freshness
+  - homebase_host_audit
+  - homebase_distill_context
+  - homebase_execution_repro
+  - homebase_perception_plan
+  - homebase_tool_factory
+  - sips_runtime_read
+  - homebase_goal_board
+  - homebase_campaign_fleet_read
+  - homebase_campaign_fleet_write
+  - sips_runtime_write
+hooks:
+  - pre_llm_call
+  - pre_tool_call
+  - post_tool_call
+  - pre_verify
+  - on_session_start
+  - on_session_end
+  - on_session_finalize
+  - on_session_reset
+  - on_skill_lifecycle
+  - subagent_start
+  - subagent_stop
