@@ -166,13 +166,13 @@ TOOLS: list[dict[str, Any]] = [
         "inputSchema": object_schema(
             {
                 "root": ROOT_PROPERTY,
-                "tier": {"type": "string", "description": "Memory tier: work, knowledge, or learning."},
+                "tier": {"type": "string", "enum": ["work", "knowledge", "learning"], "description": "Memory tier: work, knowledge, or learning."},
                 "title": {"type": "string", "description": "Short record title."},
                 "body": {"type": "string", "description": "The lesson or observation to retain."},
                 "scope": {"type": "string", "description": "Repo/file scope. Defaults to root."},
                 "tags": {"type": "string", "description": "Comma-separated tags."},
-                "confidence": {"type": "string", "description": "Record confidence. Defaults to medium."},
-                "status": {"type": "string", "description": "Record status. Defaults to active."},
+                "confidence": {"type": "string", "enum": ["high", "medium", "low", "unknown"], "description": "Record confidence. Defaults to medium."},
+                "status": {"type": "string", "enum": ["active", "candidate", "superseded", "archived"], "description": "Record status. Defaults to active."},
                 "verify_before_use": {"type": "boolean", "description": "Require verification before recall use."},
                 "evidence_path": {"type": "string", "description": "Optional evidence path."},
                 "provenance": {"type": "string", "description": "Optional detail appended to the SIPS provenance."},
@@ -2026,6 +2026,18 @@ def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         body = str(arguments.get("body") or "").strip()
         if not tier or not title or not body:
             raise JsonRpcError(-32602, "tier, title, and body are required")
+        # Fail fast on invalid enums: a clear one-line error beats a 15-line
+        # traceback from the Memory Fabric CLI subprocess (2026-08-28).
+        import memory_fabric_schema as _mfs
+
+        try:
+            tier = _mfs.normalize_tier(tier)
+            confidence = str(arguments.get("confidence") or "medium")
+            status = str(arguments.get("status") or "active")
+            _mfs.normalize_confidence(confidence)
+            _mfs.normalize_status(status)
+        except ValueError as exc:
+            raise JsonRpcError(-32602, str(exc)) from exc
         payload = record_payload(
             root,
             tier,

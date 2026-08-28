@@ -30,6 +30,9 @@ _SECRET_KEY = re.compile(r"(?:api[_-]?key|access[_-]?token|password|secret|autho
 _SECRET_VALUE = re.compile(
     r"(?i)(api[_-]?key|access[_-]?token|password|secret|authorization)(\s*[:=]\s*)\S+"
 )
+# Housekeeping runs at most once per 24h per process (module-level guard).
+_HK_LAST_RUN = 0.0
+_HK_INTERVAL_SECONDS = 24 * 3600
 
 
 def configure_environment() -> Path:
@@ -254,6 +257,25 @@ def _translated_tool(kwargs: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     return name, args
 
 
+def _maybe_run_housekeeping() -> None:
+    """Run state-root housekeeping at most once per 24h per process.
+
+    Mirrors the sips_session_bridge pattern: import inside try/except so a
+    missing or broken script never breaks the session-start hook path.
+    """
+    global _HK_LAST_RUN
+    now = time.time()
+    if now - _HK_LAST_RUN < _HK_INTERVAL_SECONDS:
+        return
+    _HK_LAST_RUN = now
+    try:
+        from sips_housekeeping import run_housekeeping
+
+        run_housekeeping(dry_run=False)
+    except Exception:
+        logger.debug("SIPS housekeeping skipped", exc_info=True)
+
+
 def _on_session_start(**kwargs: Any) -> None:
     configure_environment()
     sid = _session_id(kwargs)
@@ -263,6 +285,7 @@ def _on_session_start(**kwargs: Any) -> None:
         start_session(sid, _cwd(kwargs), evidence_path=str(_event_path()))
     except Exception:
         logger.debug("SIPS runtime session start skipped", exc_info=True)
+    _maybe_run_housekeeping()
     result = _run_script(
         "improvement_injector.py",
         {"hook_event_name": "SessionStart", "session_id": sid, "cwd": _cwd(kwargs)},
