@@ -698,6 +698,10 @@ def get_runs() -> dict[str, Any]:
         }
 
     run_dirs.sort(key=lambda d: d.stat().st_mtime, reverse=True)
+    # Terminal/alias semantics mirror the runtime reducer (controller.py):
+    # task.advanced carries result.status with complete/cancelled aliases and a
+    # retry status that returns the task to pending.
+    _TASK_STATUS_ALIASES = {"complete": "succeeded", "completed": "succeeded", "done": "succeeded", "cancelled": "canceled"}
     runs_out: list[dict[str, Any]] = []
     for run_dir in run_dirs[:12]:
         events_path = run_dir / "events.jsonl"
@@ -705,6 +709,8 @@ def get_runs() -> dict[str, Any]:
         last_event = ""
         submitted = False
         event_count = 0
+        task_total = 0
+        task_states: dict[str, str] = {}
         try:
             with events_path.open(encoding="utf-8") as handle:
                 for line in handle:
@@ -714,15 +720,37 @@ def get_runs() -> dict[str, Any]:
                         continue
                     event_count += 1
                     event_type = str(event.get("event_type") or "")
+                    payload = event.get("payload")
+                    if not isinstance(payload, dict):
+                        payload = {}
                     if event_type == "run.created":
-                        payload = event.get("payload")
-                        if isinstance(payload, dict):
-                            objective = str(payload.get("objective") or "")
+                        objective = str(payload.get("objective") or "")
+                        task_total = sum(1 for task in (payload.get("tasks") or []) if isinstance(task, dict) and task.get("id"))
                     elif event_type == "run.submitted":
                         submitted = True
+                    elif event_type in {"task.leased", "task.heartbeat", "task.advanced"}:
+                        task_id = str(payload.get("task_id") or "")
+                        if task_id:
+                            if event_type == "task.leased":
+                                task_states[task_id] = "leased"
+                            elif event_type == "task.heartbeat":
+                                task_states[task_id] = "running"
+                            else:
+                                status = str((payload.get("result") or {}).get("status") or payload.get("status") or "succeeded").lower()
+                                status = _TASK_STATUS_ALIASES.get(status, status)
+                                task_states[task_id] = "pending" if status == "retry" else status
                     last_event = event_type
         except OSError:
             continue
+        progress = {"total": task_total, "succeeded": 0, "failed": 0, "active": 0}
+        for status in task_states.values():
+            if status == "succeeded":
+                progress["succeeded"] += 1
+            elif status in {"failed", "blocked", "canceled"}:
+                progress["failed"] += 1
+            else:
+                progress["active"] += 1
+        progress["active"] += max(0, task_total - len(task_states))
         mtime = events_path.stat().st_mtime
         annotations = _read_run_annotations(run_dir)
         if last_event == "task.result":
@@ -743,6 +771,7 @@ def get_runs() -> dict[str, Any]:
                 "status": status,
                 "last_event": last_event[:40],
                 "events": event_count,
+                "progress": progress,
                 "updated_at": datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat(),
             }
         )
@@ -1177,6 +1206,17 @@ def get_memory(tier: str = "", status: str = "", query: str = "", limit: int = 2
                 continue
         filtered.append(rec)
     filtered.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+    # Filter-button counts: always computed over the full store (before this
+    # request's own filters) so each toggle shows how many records it selects.
+    tier_counts: dict[str, int] = {}
+    status_counts: dict[str, int] = {}
+    for rec in records:
+        if not isinstance(rec, dict):
+            continue
+        rec_tier = str(rec.get("tier") or "unknown")[:20]
+        rec_status = str(rec.get("status") or "unknown")[:20]
+        tier_counts[rec_tier] = tier_counts.get(rec_tier, 0) + 1
+        status_counts[rec_status] = status_counts.get(rec_status, 0) + 1
     out = [
         {
             "id": str(r.get("id") or "")[:80],
@@ -1196,6 +1236,8 @@ def get_memory(tier: str = "", status: str = "", query: str = "", limit: int = 2
         "available": True,
         "total_matched": len(filtered),
         "total_records": len(records),
+        "tier_counts": tier_counts,
+        "status_counts": status_counts,
         "records": out,
         "generated_at": _now(),
         "claim_boundary": "Bounded browse projection; full bodies stay in the store.",

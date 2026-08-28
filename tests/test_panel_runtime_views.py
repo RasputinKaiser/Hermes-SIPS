@@ -433,3 +433,81 @@ def test_fleet_campaign_detail_projects_children_and_activity(sips_home: Path, m
     assert child["role"] == "Worker"
     assert view["activity"], "activity entries projected"
     assert "event_type" not in view["activity"][0]  # renamed to kind
+
+
+def test_runs_projects_task_progress_from_events(sips_home: Path) -> None:
+    """Per-run progress derives from run.created specs + task.* events."""
+    _write_events(
+        "h-progress",
+        [
+            {
+                "event_type": "run.created",
+                "payload": {
+                    "objective": "progress run",
+                    "tasks": [{"id": "t1"}, {"id": "t2"}, {"id": "t3"}, {"id": "t4"}],
+                },
+            },
+            {"event_type": "run.submitted", "payload": {}},
+            {"event_type": "task.leased", "payload": {"task_id": "t1"}},
+            {"event_type": "task.heartbeat", "payload": {"task_id": "t1"}},
+            {"event_type": "task.advanced", "payload": {"task_id": "t1", "result": {"status": "succeeded"}}},
+            # alias + retry semantics mirror the runtime reducer
+            {"event_type": "task.advanced", "payload": {"task_id": "t2", "result": {"status": "complete"}}},
+            {"event_type": "task.advanced", "payload": {"task_id": "t3", "result": {"status": "failed"}}},
+            {"event_type": "task.advanced", "payload": {"task_id": "t4", "result": {"status": "retry"}}},
+            {"event_type": "task.leased", "payload": {"task_id": "t4"}},
+        ],
+        sips_home,
+    )
+    view = plugin_api.get_runs()
+    assert view["available"] is True
+    run = next(r for r in view["runs"] if r["run_id"] == "h-progress")
+    assert run["progress"] == {"total": 4, "succeeded": 2, "failed": 1, "active": 1}
+
+
+def test_runs_progress_never_seen_tasks_count_active(sips_home: Path) -> None:
+    """Tasks declared in the plan but never leased stay in the active bucket."""
+    _write_events(
+        "h-untouched",
+        [
+            {
+                "event_type": "run.created",
+                "payload": {"objective": "idle run", "tasks": [{"id": "a"}, {"id": "b"}]},
+            },
+        ],
+        sips_home,
+    )
+    view = plugin_api.get_runs()
+    run = next(r for r in view["runs"] if r["run_id"] == "h-untouched")
+    assert run["progress"] == {"total": 2, "succeeded": 0, "failed": 0, "active": 2}
+
+
+def test_runs_without_task_events_progress_is_zeroed(sips_home: Path) -> None:
+    _write_events(
+        "h-no-tasks",
+        [
+            {"event_type": "run.created", "payload": {"objective": "no task specs"}},
+            {"event_type": "run.submitted", "payload": {}},
+        ],
+        sips_home,
+    )
+    view = plugin_api.get_runs()
+    run = next(r for r in view["runs"] if r["run_id"] == "h-no-tasks")
+    assert run["progress"] == {"total": 0, "succeeded": 0, "failed": 0, "active": 0}
+
+
+def test_memory_browse_returns_filter_counts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """tier_counts/status_counts come from the full store, ignoring filters."""
+    monkeypatch.setattr(plugin_api, "load_records", lambda: [
+        {"id": "m1", "title": "A", "tier": "work", "status": "active", "created_at": "2026-08-28T00:00:00+00:00"},
+        {"id": "m2", "title": "B", "tier": "work", "status": "candidate", "created_at": "2026-08-27T00:00:00+00:00"},
+        {"id": "m3", "title": "C", "tier": "learning", "status": "archived", "created_at": "2026-08-26T00:00:00+00:00"},
+    ])
+    unfiltered = plugin_api.get_memory()
+    assert unfiltered["tier_counts"] == {"work": 2, "learning": 1}
+    assert unfiltered["status_counts"] == {"active": 1, "candidate": 1, "archived": 1}
+    # Counts are unaffected by the request's own filters.
+    filtered = plugin_api.get_memory(tier="work")
+    assert filtered["total_matched"] == 2
+    assert filtered["tier_counts"] == {"work": 2, "learning": 1}
+    assert filtered["status_counts"] == {"active": 1, "candidate": 1, "archived": 1}
