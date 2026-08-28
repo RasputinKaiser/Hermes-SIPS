@@ -495,6 +495,85 @@ def test_run_detail_projects_gates_and_lesson(sips_home: Path) -> None:
     assert task["answer"] == "did the gated thing"
 
 
+def test_run_events_endpoint_projects_task_summaries(sips_home: Path) -> None:
+    """GET /runs/{id}/events: bounded trail with task_id + per-event summary."""
+    import subprocess
+
+    env = dict(os.environ, SIPS_HOME=str(sips_home))
+    cli = str(_REPO_ROOT / "scripts" / "sips_runtime.py")
+
+    def _cli(op: str, payload: dict) -> dict:
+        proc = subprocess.run(
+            ["python3", cli, "write", "--op", op, "--json", json.dumps(payload)],
+            check=True, env=env, capture_output=True, text=True,
+        )
+        return json.loads(proc.stdout)
+
+    _cli("create", {
+        "run_id": "h-events",
+        "objective": "event trail run",
+        "idempotency_key": "h-events:create",
+        "expected_revision": 0,
+        "tasks": [{"id": "task-e", "objective": "eventful task",
+                   "estimated_tokens": 8000, "retry_limit": 1}],
+    })
+    _cli("submit", {"run_id": "h-events", "idempotency_key": "h-events:submit", "expected_revision": 1})
+    _cli("lease", {"run_id": "h-events", "owner": "tester", "task_id": "task-e",
+                   "idempotency_key": "h-events:lease", "expected_revision": 2})
+    fencing = None
+    events_path = sips_home / "runtime" / "v1" / "runs" / "h-events" / "events.jsonl"
+    for line in events_path.read_text(encoding="utf-8").splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if event.get("event_type") == "task.leased":
+            fencing = ((event.get("payload") or {}).get("lease") or {}).get("fencing_token")
+    assert fencing is not None
+    _cli("advance", {
+        "run_id": "h-events", "task_id": "task-e", "owner": "tester",
+        "idempotency_key": "h-events:advance", "expected_revision": 3,
+        "fencing_token": fencing, "status": "succeeded", "summary": "the eventful outcome",
+        "gates": {name: {"ok": True, "evidence": [
+            {"status": "passed", "evidence_path": str(sips_home / f"{name}.jsonl"), "count": 1}]}
+            for name in ("integrity", "correctness", "regression", "resource", "benefit")},
+    })
+
+    view = plugin_api.get_run_events("h-events")
+    assert view["available"] is True
+    assert view["total"] == 4  # create + submit + lease + advance
+    advanced = next(e for e in view["events"] if e["type"] == "task.advanced")
+    assert advanced["task_id"] == "task-e"
+    assert advanced["summary"] == "the eventful outcome"
+    created = next(e for e in view["events"] if e["type"] == "run.created")
+    assert created["task_id"] is None
+    # unknown run degrades like the detail view
+    missing = plugin_api.get_run_events("h-does-not-exist")
+    assert missing["available"] is False
+    # limit clamps
+    assert len(plugin_api.get_run_events("h-events", limit=2)["events"]) == 2
+
+
+def test_run_detail_counts_receipts(sips_home: Path) -> None:
+    """receipt_count reflects the run's receipts/ dir (0 when absent)."""
+    run_dir = sips_home / "runtime" / "v1" / "runs" / "h-receipts"
+    (run_dir / "receipts").mkdir(parents=True)
+    (run_dir / "receipts" / "000001-x.json").write_text("{}", encoding="utf-8")
+    (run_dir / "receipts" / "000002-y.json").write_text("{}", encoding="utf-8")
+    (run_dir / "events.jsonl").write_text(
+        json.dumps({"event_type": "run.created", "payload": {"objective": "r"}}) + "\n",
+        encoding="utf-8",
+    )
+    view = plugin_api.get_run_detail("h-receipts")
+    # status read fails without full runtime state (no lease present), but the
+    # receipt_count projection works independently of run validity.
+    assert view.get("receipt_count") == 2
+    # a run with no receipts dir reports 0 through the same path
+    (sips_home / "runtime" / "v1" / "runs" / "h-empty").mkdir(parents=True)
+    (sips_home / "runtime" / "v1" / "runs" / "h-empty" / "events.jsonl").write_text("", encoding="utf-8")
+    assert plugin_api.get_run_detail("h-empty").get("receipt_count") == 0
+
+
 def test_runs_projects_task_progress_from_events(sips_home: Path) -> None:
     """Per-run progress derives from run.created specs + task.* events."""
     _write_events(

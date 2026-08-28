@@ -15,7 +15,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from fastapi import APIRouter, HTTPException
 
@@ -860,6 +860,7 @@ def get_run_detail(run_id: str) -> dict[str, Any]:
             "available": False,
             "reason": str(status_read.get("error") or "run_not_found"),
             "run_id": safe_id,
+            "receipt_count": _count_receipts(safe_id),
             "generated_at": _now(),
             "claim_boundary": "No runtime run matched that id.",
         }
@@ -901,6 +902,8 @@ def get_run_detail(run_id: str) -> dict[str, Any]:
             for gate_name, gate in list(raw_gates.items())[:6]:
                 if isinstance(gate, dict) and gate.get("ok") is not None:
                     gates_out[str(gate_name)[:40]] = "ok" if gate.get("ok") else "failed"
+        usage = result.get("usage") if isinstance(result.get("usage"), Mapping) else {}
+        resources = usage.get("resources") if isinstance(usage.get("resources"), Mapping) else usage
         tasks_out.append(
             {
                 "id": str(item.get("id") or spec.get("id") or "")[:60],
@@ -911,6 +914,7 @@ def get_run_detail(run_id: str) -> dict[str, Any]:
                 "answer": str(result.get("summary") or "")[:300],
                 "gates": gates_out,
                 "has_lesson": bool(result.get("lesson_candidate")),
+                "tokens": int(resources.get("model_tokens") or resources.get("tokens") or 0),
             }
         )
     budget_usage = status_data.get("budget_usage")
@@ -928,8 +932,87 @@ def get_run_detail(run_id: str) -> dict[str, Any]:
         "budget_usage": {str(k)[:40]: int(v) for k, v in (budget_usage or {}).items() if isinstance(v, int)},
         "tasks": tasks_out,
         "events": events_out,
+        "receipt_count": _count_receipts(safe_id),
         "generated_at": _now(),
         "claim_boundary": "Read-only projection of one runtime run; event payloads stay in the runtime store.",
+    }
+
+
+def _count_receipts(safe_id: str) -> int:
+    """Count receipt files for a run (bounded read, 0 on any failure)."""
+    try:
+        from sips_runtime.controller import runtime_root
+
+        receipts_dir = runtime_root() / safe_id / "receipts"
+        if not receipts_dir.is_dir():
+            return 0
+        return sum(1 for path in receipts_dir.iterdir() if path.is_file() and path.suffix == ".json")
+    except Exception:
+        return 0
+
+@router.get("/runs/{run_id}/events")
+def get_run_events(run_id: str, limit: int = 40) -> dict[str, Any]:
+    """Deeper bounded event trail for one run: per-task summaries included.
+
+    The /runs/{run_id} detail view carries a shallow 15-event strip; this
+    endpoint serves up to 50 events with task ids and result summaries so the
+    panel can page through a run's full activity. Read-only, safe ids only.
+    """
+    safe_id = run_id.strip()[:80]
+    limit = max(1, min(int(limit or 40), 50))
+    try:
+        from sips_runtime.api import RuntimeAPI
+    except Exception as exc:  # pragma: no cover - defensive API boundary
+        return {
+            "schema": "sips.run.events.v1",
+            "available": False,
+            "reason": f"runtime unavailable: {type(exc).__name__}",
+            "run_id": safe_id,
+            "events": [],
+            "generated_at": _now(),
+            "claim_boundary": "The runtime read failed before producing events.",
+        }
+
+    api = RuntimeAPI()
+    status_read = api.read("status", {"run_id": safe_id})
+    if not status_read.get("ok"):
+        return {
+            "schema": "sips.run.events.v1",
+            "available": False,
+            "reason": str(status_read.get("error") or "run_not_found"),
+            "run_id": safe_id,
+            "events": [],
+            "generated_at": _now(),
+            "claim_boundary": "No runtime run matched that id.",
+        }
+
+    events_read = api.read("events", {"run_id": safe_id})
+    raw_events = events_read.get("data")
+    event_items = raw_events if isinstance(raw_events, list) else []
+    events_out: list[dict[str, Any]] = []
+    for event in event_items[-limit:]:
+        if not isinstance(event, dict):
+            continue
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        result = payload.get("result") if isinstance(payload.get("result"), dict) else {}
+        events_out.append(
+            {
+                "type": str(event.get("event_type") or "")[:40],
+                "at": str(event.get("timestamp") or "")[:40],
+                "revision": int(event.get("revision") or 0),
+                "actor": str(event.get("actor") or "")[:40],
+                "task_id": str(payload.get("task_id") or "")[:60] or None,
+                "summary": str(result.get("summary") or "")[:240] or None,
+            }
+        )
+    return {
+        "schema": "sips.run.events.v1",
+        "available": True,
+        "run_id": safe_id,
+        "total": len(event_items),
+        "events": events_out,
+        "generated_at": _now(),
+        "claim_boundary": "Bounded event projection; payloads, digests, and evidence stay in the runtime store.",
     }
 
 
