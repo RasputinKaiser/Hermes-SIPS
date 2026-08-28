@@ -576,6 +576,86 @@ def post_record(body: dict[str, Any]) -> dict[str, Any]:
                 "generated_at": _now(), "claim_boundary": "The record write failed before persisting."}
 
 
+@router.get("/runtime")
+def get_runtime() -> dict[str, Any]:
+    """Bounded view of the graph-runtime Goal Board (latest run auto-discovered).
+
+    Surfaces the runtime-backed session runs the session bridge writes: one
+    run per Hermes session, receipts and gate evidence included. Read-only —
+    no mutation endpoint exists for the runtime here.
+    """
+    try:
+        from harness_homebase_mcp import goal_board_payload
+
+        payload = goal_board_payload(PLUGIN_ROOT, "", None, 12)
+    except Exception as exc:  # pragma: no cover - defensive API boundary
+        return {
+            "schema": "sips.runtime.view.v1",
+            "available": False,
+            "reason": f"runtime unavailable: {type(exc).__name__}",
+            "generated_at": _now(),
+            "claim_boundary": "The runtime read failed before producing board state.",
+        }
+
+    if not payload.get("ok"):
+        return {
+            "schema": "sips.runtime.view.v1",
+            "available": False,
+            "reason": str(payload.get("error") or "no runtime event stream"),
+            "generated_at": _now(),
+            "claim_boundary": "No runtime run was available to read.",
+        }
+
+    raw_data = payload.get("data")
+    data = raw_data if isinstance(raw_data, dict) else {}
+    tasks_out: list[dict[str, Any]] = []
+    for task in (data.get("tasks") or [])[:6]:
+        if not isinstance(task, dict):
+            continue
+        raw_receipt = task.get("receipt")
+        receipt = raw_receipt if isinstance(raw_receipt, dict) else {}
+        raw_structured = receipt.get("structured")
+        structured = raw_structured if isinstance(raw_structured, dict) else {}
+        raw_gates = structured.get("gates")
+        gates = raw_gates if isinstance(raw_gates, dict) else {}
+        tasks_out.append(
+            {
+                "id": str(task.get("id") or "")[:60],
+                "title": str(task.get("title") or "")[:220],
+                "status": str(task.get("status") or "unknown"),
+                "attempts": int(task.get("attempts") or 0),
+                "phase": str(task.get("phase") or "")[:40],
+                "answer": str(structured.get("answer") or "")[:400],
+                "gate_status": {str(name)[:40]: str(gate.get("status") or "unknown")[:40] for name, gate in list(gates.items())[:6] if isinstance(gate, dict)},
+                "has_receipt": bool(receipt),
+            }
+        )
+    raw_progress = data.get("progress")
+    progress = raw_progress if isinstance(raw_progress, dict) else {}
+    raw_provenance = data.get("provenance")
+    provenance = raw_provenance if isinstance(raw_provenance, dict) else {}
+    return {
+        "schema": "sips.runtime.view.v1",
+        "available": True,
+        "authority": str(data.get("authority") or "unknown"),
+        "run_id": str(data.get("run_id") or "")[:80],
+        "status": str(data.get("status") or "unknown"),
+        "objective": str(data.get("objective") or "")[:320],
+        "revision": int(data.get("revision") or 0),
+        "progress": {
+            "complete": int(progress.get("complete") or 0),
+            "total": int(progress.get("total") or 0),
+            "ratio": float(progress.get("ratio") or 0.0),
+        },
+        "counts": {str(k)[:30]: int(v) for k, v in (data.get("counts") or {}).items() if isinstance(v, int)},
+        "tasks": tasks_out,
+        "source_path": str(provenance.get("source_path") or "")[:300],
+        "last_updated_at": provenance.get("last_updated_at"),
+        "generated_at": _now(),
+        "claim_boundary": "Read-only projection of the SIPS graph-runtime Goal Board; receipts are summaries, not full evidence.",
+    }
+
+
 @router.get("/routes")
 def get_routes() -> dict[str, Any]:
     try:

@@ -1541,9 +1541,13 @@ def _latest_runtime_run_id(root: Path) -> str:
     The session bridge writes one runtime run per Hermes session under
     ``$SIPS_HOME/runtime/v1/runs``; picking the latest by mtime makes the Goal
     Board show live session work without callers needing to know run IDs.
+    Runs always live under the SIPS state root (``sips_runtime.controller.runtime_root``),
+    never under the plugin/repo root that callers pass in.
     """
     try:
-        runs_dir = root / "runtime" / "v1" / "runs"
+        from sips_runtime.controller import runtime_root
+
+        runs_dir = runtime_root(None)
         candidates = [entry for entry in runs_dir.iterdir() if entry.is_dir()]
     except OSError:
         return ""

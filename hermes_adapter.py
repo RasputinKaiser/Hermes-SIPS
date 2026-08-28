@@ -47,6 +47,12 @@ def configure_environment() -> Path:
     os.environ.setdefault("PLUGIN_ROOT", str(_PLUGIN_ROOT))
     for child in ("logs", "pending", "sessions", "eval"):
         (sips_home / child).mkdir(parents=True, exist_ok=True)
+    # Lifecycle hooks (on_session_start) can fire before register(ctx) puts
+    # scripts/ on sys.path via _load_homebase(); make bridge imports work
+    # regardless of hook ordering.
+    scripts_dir = str(_SCRIPTS_ROOT)
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
     return sips_home
 
 
@@ -254,7 +260,7 @@ def _on_session_start(**kwargs: Any) -> None:
     try:
         from sips_session_bridge import start_session
 
-        start_session(sid, _cwd(kwargs))
+        start_session(sid, _cwd(kwargs), evidence_path=str(_event_path()))
     except Exception:
         logger.debug("SIPS runtime session start skipped", exc_info=True)
     result = _run_script(

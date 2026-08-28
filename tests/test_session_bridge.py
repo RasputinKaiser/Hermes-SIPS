@@ -104,3 +104,34 @@ def test_start_is_idempotent_per_session(bridge_home: Path) -> None:
     assert bridge._ACTIVE[sid] is first
     bridge.finish_session(sid, completed=True, tool_calls=1, failures=0, turns=1, exit_reason="session_end")
     assert sid not in bridge._ACTIVE
+
+
+def test_latest_run_discovery_reads_sips_home(bridge_home: Path) -> None:
+    """Auto-discovery must read $SIPS_HOME, never the caller's root (fixed 2026-08-28).
+
+    Regression: _latest_runtime_run_id looked under the plugin/repo root, so the
+    MCP goal-board tool could never auto-discover session runs written under
+    $SIPS_HOME/runtime/v1/runs. The repo root here has no runtime dir.
+    """
+    import harness_homebase_mcp as hhm
+
+    bridge.start_session("sess-disc", str(bridge_home), evidence_path=str(bridge_home / "hook_events.jsonl"))
+    assert hhm._latest_runtime_run_id(Path.cwd()) == "h-sess-disc"
+    bridge.finish_session("sess-disc", completed=True, tool_calls=1, failures=0, turns=1, exit_reason="session_end")
+
+
+def test_finish_writes_result_with_gates(bridge_home: Path) -> None:
+    """Session end must land a durable receipt (gates validated at advance)."""
+    from sips_runtime.controller import RuntimeController
+
+    bridge.start_session("sess-gates", str(bridge_home), evidence_path=str(bridge_home / "hook_events.jsonl"))
+    bridge.finish_session("sess-gates", completed=True, turns=3, tool_calls=7, failures=0, exit_reason="session_end")
+
+    item = RuntimeController()._state("h-sess-gates")["tasks"]["session"]
+    assert item["status"] == "succeeded"
+    result = item["result"]
+    assert result["status"] == "succeeded"
+    # Gates are consumed by advance validation and not persisted on the receipt;
+    # a successful advance proves all five passed the controller's checks.
+    assert result["usage"]["resources"]["tool_calls"] >= 7
+    assert result["result_hash"]

@@ -21,8 +21,10 @@ Contract notes (verified empirically against scripts/sips_runtime/):
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -353,6 +355,31 @@ class SessionRun:
 
 
 _ACTIVE: dict[str, SessionRun] = {}
+_EVIDENCE_PATHS: dict[str, str] = {}
+
+
+def set_evidence_path(sid: str, path: str) -> None:
+    """Record the hook event stream path for a session (called by the adapter)."""
+    _EVIDENCE_PATHS[str(sid)] = str(path)
+
+
+def _evidence_for(sid: str) -> str:
+    """Resolve the session's evidence path without importing the adapter.
+
+    Prefers the path the adapter handed over; falls back to deriving it from
+    ``$SIPS_HOME`` so bare-process callers (tests, CLI) still work. Never
+    imports ``hermes_adapter`` — at runtime the loader imports it
+    package-qualified (``harness_self_improvement.hermes_adapter``), so a bare
+    import here raises ModuleNotFoundError inside hook bodies and fail-open
+    silently kills the session run (observed live 2026-08-28).
+    """
+    direct = _EVIDENCE_PATHS.get(str(sid))
+    if direct:
+        return direct
+    import os
+
+    home = os.environ.get("SIPS_HOME") or os.path.expanduser("~/.hermes")
+    return str(Path(home) / "hook_events.jsonl")
 
 
 def session_run(sid: str) -> SessionRun:
@@ -362,20 +389,20 @@ def session_run(sid: str) -> SessionRun:
     bounded-metadata JSONL the adapter already persists — so gate evidence is
     anchored to a real, existing artifact rather than a synthetic path.
     """
-    from hermes_adapter import _event_path
-
     key = str(sid)
     with _LOCK:
         run = _ACTIVE.get(key)
         if run is None:
-            run = SessionRun(key, str(_event_path()))
+            run = SessionRun(key, _evidence_for(key))
             _ACTIVE[key] = run
         return run
 
 
-def start_session(sid: str, workspace_root: str) -> None:
+def start_session(sid: str, workspace_root: str, *, evidence_path: str = "") -> None:
     """Create/lease the session's runtime run. Never raises."""
     try:
+        if evidence_path:
+            set_evidence_path(sid, evidence_path)
         run = session_run(sid)
         with _LOCK:
             if run.finished or run.token is not None:
@@ -391,6 +418,10 @@ def record_tool_call(sid: str) -> None:
     """Count a tool call and (throttled) beat the lease. Never raises."""
     run = _ACTIVE.get(str(sid))
     if run is None:
+        # Resumed sessions never saw on_session_start in this process — lazily
+        # adopt them so long-lived desktop sessions still land on the board.
+        if evidence := _EVIDENCE_PATHS.get(str(sid)):
+            return  # adapter already handed a path; start must have failed
         return
     run.tool_calls += 1
     try:

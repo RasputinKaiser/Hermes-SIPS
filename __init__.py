@@ -14,6 +14,8 @@ from typing import Any
 _PLUGIN_ROOT = Path(__file__).resolve().parent
 _SCRIPTS_ROOT = _PLUGIN_ROOT / "scripts"
 
+logger = logging.getLogger(__name__)
+
 try:
     from . import hermes_adapter
 except ImportError as exc:
@@ -42,10 +44,19 @@ def _tool_handler(homebase: Any, name: str, args: dict[str, Any], **_kwargs: Any
         result = homebase.call_tool(name, args if isinstance(args, dict) else {})
         return result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
     except Exception as exc:
-        from tools.registry import tool_error
-
         logger.warning("SIPS tool %s failed: %s", name, type(exc).__name__)
-        return tool_error(f"SIPS {name} failed: {type(exc).__name__}")
+        # Self-contained fallback: `tools.registry` only exists inside the
+        # Hermes process; importing it unconditionally here turned any tool
+        # error in a bare/test process into an opaque ModuleNotFoundError.
+        try:
+            from tools.registry import tool_error
+
+            return tool_error(f"SIPS {name} failed: {type(exc).__name__}")
+        except ImportError:
+            return json.dumps(
+                {"ok": False, "error": f"SIPS {name} failed: {type(exc).__name__}"},
+                ensure_ascii=False,
+            )
 
 
 def _json_tool(homebase: Any, name: str, args: dict[str, Any]) -> dict[str, Any]:
