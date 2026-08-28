@@ -328,7 +328,14 @@ const styles = {
   tapeRow: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '12px',
     padding: '5px 0', borderBottom: '1px dashed rgba(51,48,42,0.25)', fontSize: '12px'
-  }
+  },
+  // Session runs + campaign fleet: compact shared list rows.
+  listRow: { display: 'grid', gap: '4px', padding: '8px 0', borderBottom: `1px solid ${COLORS.border}` },
+  listMain: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' },
+  listId: { fontSize: '12px', fontWeight: 650, fontFamily: 'ui-monospace, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  listMeta: { display: 'inline-flex', alignItems: 'center', gap: '10px', flexShrink: 0 },
+  listSecondary: { color: COLORS.muted, fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  listTags: { display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }
 }
 
 function toneFor(value) {
@@ -1507,6 +1514,106 @@ function RuntimeCard({ api }) {
   })
 }
 
+function runStatusTone(status) {
+  if (status === 'running') return 'accent'
+  if (status === 'succeeded') return 'good'
+  return 'muted'
+}
+
+function RunsCard({ api }) {
+  const query = useQuery({ queryKey: ['sips-control-plane', 'runs'], queryFn: () => api.rest('/runs'), refetchInterval: 30000 })
+
+  if (query.isLoading) {
+    return jsx(Card, { title: 'Session runs', icon: 'history', children: jsx('div', { style: styles.unavailable, children: 'Reading session runs…' }) })
+  }
+  const runs = query.data
+  if (!runs?.available) {
+    return jsx(Card, {
+      title: 'Session runs',
+      icon: 'history',
+      hint: 'Backed by the sips_runtime graph run history.',
+      children: jsx('div', { style: styles.unavailable, children: runs?.reason || 'No session run history yet — it appears once a session bridges to the graph runtime.' })
+    })
+  }
+
+  const entries = runs.runs || []
+  return jsx(Card, {
+    title: `Runs · ${compactNumber(runs.total ?? entries.length)}`,
+    icon: 'history',
+    hint: 'Most recent sessions first; status reflects the run lifecycle, not proof.',
+    children: entries.length ? jsx('div', {
+      style: styles.routeGrid,
+      children: entries.map((run, index) => jsxs('div', {
+        style: { ...styles.listRow, ...(index === entries.length - 1 ? { borderBottom: 'none' } : {}) },
+        children: [
+          jsx('div', { style: styles.listMain, children: [
+            jsx('span', { style: styles.listId, title: run.run_id, children: run.run_id || '?' }),
+            jsxs('span', { style: styles.listMeta, children: [
+              jsx('span', { style: { ...styles.value, fontVariantNumeric: 'tabular-nums' }, children: `${run.events ?? 0} events` }),
+              jsx(StateBadge, { value: run.status, tone: runStatusTone(run.status) }),
+              jsx('span', { style: styles.eventTime, children: formatRelativeTimestamp(run.updated_at) })
+            ] })
+          ] }),
+          run.objective ? jsx('div', { style: styles.listSecondary, title: run.objective, children: run.objective }) : null
+        ]
+      }, `run-${run.run_id || index}`))
+    }) : jsx('div', { style: styles.unavailable, children: 'No session runs recorded yet.' })
+  })
+}
+
+function FleetCard({ api }) {
+  const query = useQuery({ queryKey: ['sips-control-plane', 'fleet'], queryFn: () => api.rest('/fleet'), refetchInterval: 30000 })
+
+  if (query.isLoading) {
+    return jsx(Card, { title: 'Campaign fleet', icon: 'layers', children: jsx('div', { style: styles.unavailable, children: 'Reading campaign fleet…' }) })
+  }
+  const fleet = query.data
+  if (!fleet?.available) {
+    return jsx(Card, {
+      title: 'Campaign fleet',
+      icon: 'layers',
+      hint: 'Backed by campaign fleet spines in the graph runtime.',
+      children: jsx('div', { style: styles.unavailable, children: fleet?.reason || 'Campaign fleet is unavailable.' })
+    })
+  }
+
+  const campaigns = fleet.campaigns || []
+  if (!campaigns.length) {
+    return jsx(Card, {
+      title: 'Campaign fleet',
+      icon: 'layers',
+      hint: 'Backed by campaign fleet spines in the graph runtime.',
+      children: jsx('div', { style: styles.unavailable, children: 'No campaigns yet — fleet spines appear when campaign work starts.' })
+    })
+  }
+
+  return jsx(Card, {
+    title: `Fleet · ${compactNumber(fleet.total ?? campaigns.length)}`,
+    icon: 'layers',
+    hint: 'Campaign spines and their child threads; listing does not prove campaign health.',
+    children: jsx('div', {
+      style: styles.routeGrid,
+      children: campaigns.map((campaign, index) => jsxs('div', {
+        style: { ...styles.listRow, ...(index === campaigns.length - 1 ? { borderBottom: 'none' } : {}) },
+        children: [
+          jsx('div', { style: styles.listMain, children: [
+            jsx('span', { style: styles.listId, title: campaign.campaign_id, children: campaign.campaign_id || '?' }),
+            jsxs('span', { style: styles.listMeta, children: [
+              jsx('span', { style: { ...styles.value, fontVariantNumeric: 'tabular-nums' }, children: [
+                `${campaign.child_count ?? 0} child${Number(campaign.child_count) === 1 ? '' : 'ren'}`,
+                Number(campaign.archived_child_count) > 0 ? ` · ${campaign.archived_child_count} archived` : null
+              ] }),
+              jsx(StateBadge, { value: campaign.status })
+            ] })
+          ] }),
+          campaign.objective ? jsx('div', { style: styles.listSecondary, title: campaign.objective, children: campaign.objective }) : null,
+          (campaign.tags || []).length ? jsx('div', { style: styles.listTags, children: campaign.tags.map((tag) => jsx(Badge, { key: tag, variant: 'outline', style: styles.metaBadge, children: tag })) }) : null
+        ]
+      }, `campaign-${campaign.campaign_id || index}`))
+    })
+  })
+}
+
 function EventsCard({ events }) {
   const [filter, setFilter] = useState('all')
   const [expanded, setExpanded] = useState(false)
@@ -1831,6 +1938,8 @@ function Dashboard({ api }) {
         jsx('div', { style: styles.leadRow, children: jsx(GoalCard, { goal: data.goal, api, selfloop: selfloopQuery.data, onSelfloopMutated: () => selfloopQuery.refetch() }) }),
         jsx('div', { style: styles.supportGrid, children: [
           jsx(RuntimeCard, { api }),
+          jsx(RunsCard, { api }),
+          jsx(FleetCard, { api }),
           jsx(MemoryCard, { memory: data.memory }),
           jsx(SurfaceCard, { counts })
         ] })

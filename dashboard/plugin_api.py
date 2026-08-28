@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -653,6 +654,218 @@ def get_runtime() -> dict[str, Any]:
         "last_updated_at": provenance.get("last_updated_at"),
         "generated_at": _now(),
         "claim_boundary": "Read-only projection of the SIPS graph-runtime Goal Board; receipts are summaries, not full evidence.",
+    }
+
+
+@router.get("/runs")
+def get_runs() -> dict[str, Any]:
+    """Bounded history of runtime session runs (most recent first).
+
+    Each Hermes session writes one graph-runtime run under
+    ``$SIPS_HOME/runtime/v1/runs``. This surfaces every run as a summary row
+    derived from its event stream — read-only, no run payloads leave the host.
+    """
+    try:
+        from sips_runtime.controller import runtime_root
+
+        runs_root = runtime_root()
+        run_dirs = [d for d in runs_root.iterdir() if (d / "events.jsonl").exists()] if runs_root.is_dir() else []
+    except Exception as exc:  # pragma: no cover - defensive API boundary
+        return {
+            "schema": "sips.runs.view.v1",
+            "available": False,
+            "reason": f"runtime unavailable: {type(exc).__name__}",
+            "runs": [],
+            "generated_at": _now(),
+            "claim_boundary": "The runtime read failed before producing run history.",
+        }
+
+    run_dirs.sort(key=lambda d: d.stat().st_mtime, reverse=True)
+    runs_out: list[dict[str, Any]] = []
+    for run_dir in run_dirs[:12]:
+        events_path = run_dir / "events.jsonl"
+        objective = ""
+        last_event = ""
+        submitted = False
+        event_count = 0
+        try:
+            with events_path.open(encoding="utf-8") as handle:
+                for line in handle:
+                    try:
+                        event = json.loads(line)
+                    except ValueError:
+                        continue
+                    event_count += 1
+                    event_type = str(event.get("event_type") or "")
+                    if event_type == "run.created":
+                        payload = event.get("payload")
+                        if isinstance(payload, dict):
+                            objective = str(payload.get("objective") or "")
+                    elif event_type == "run.submitted":
+                        submitted = True
+                    last_event = event_type
+        except OSError:
+            continue
+        mtime = events_path.stat().st_mtime
+        if last_event == "task.result":
+            status = "succeeded"
+        elif not submitted:
+            status = "created"
+        elif time.time() - mtime > 6 * 3600:
+            # A session that never landed its result and has been silent for
+            # 6h+ is stale, not running (crashed host, killed process, etc.).
+            status = "stale"
+        else:
+            status = "running"
+        runs_out.append(
+            {
+                "run_id": run_dir.name[:80],
+                "objective": objective[:320],
+                "status": status,
+                "last_event": last_event[:40],
+                "events": event_count,
+                "updated_at": datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat(),
+            }
+        )
+    return {
+        "schema": "sips.runs.view.v1",
+        "available": True,
+        "total": len(run_dirs),
+        "runs": runs_out,
+        "generated_at": _now(),
+        "claim_boundary": "Run summaries derive from event streams; task results live in the runtime, not here.",
+    }
+
+
+@router.get("/fleet")
+def get_fleet() -> dict[str, Any]:
+    """Bounded view of the campaign fleet (event-backed campaign spines)."""
+    try:
+        from harness_homebase_mcp import call_tool
+
+        result = call_tool("homebase_campaign_fleet_read", {"root": str(PLUGIN_ROOT), "operation": "list", "limit": 12})
+        structured = result.get("structuredContent") or {}
+    except Exception as exc:  # pragma: no cover - defensive API boundary
+        return {
+            "schema": "sips.fleet.view.v1",
+            "available": False,
+            "reason": f"fleet unavailable: {type(exc).__name__}",
+            "campaigns": [],
+            "generated_at": _now(),
+            "claim_boundary": "The fleet read failed before producing campaign state.",
+        }
+
+    raw_data = structured.get("data")
+    campaigns_raw = raw_data if isinstance(raw_data, list) else []
+    campaigns: list[dict[str, Any]] = []
+    for item in campaigns_raw[:12]:
+        if not isinstance(item, dict):
+            continue
+        campaigns.append(
+            {
+                "campaign_id": str(item.get("campaign_id") or "")[:80],
+                "objective": str(item.get("objective") or "")[:320],
+                "status": str(item.get("status") or "unknown")[:40],
+                "child_count": int(item.get("child_count") or 0),
+                "archived_child_count": int(item.get("archived_child_count") or 0),
+                "runtime_run_id": str(item.get("runtime_run_id") or "")[:80],
+                "tags": [str(t)[:40] for t in (item.get("tags") or [])[:6] if isinstance(t, (str, int))],
+                "updated_at": str(item.get("updated_at") or "")[:40],
+            }
+        )
+    return {
+        "schema": "sips.fleet.view.v1",
+        "available": True,
+        "total": len(campaigns_raw),
+        "storage_root": str(structured.get("storage_root") or "")[:300],
+        "campaigns": campaigns,
+        "generated_at": _now(),
+        "claim_boundary": "Fleet metadata is event-backed; child conversations are enumerated by the host, not here.",
+    }
+
+
+@router.get("/fleet/{campaign_id}")
+def get_fleet_campaign(campaign_id: str) -> dict[str, Any]:
+    """Bounded detail view of one campaign spine, including attached children."""
+    safe_id = campaign_id.strip()[:80]
+    if not safe_id or any(ch in safe_id for ch in "/\\"):
+        raise HTTPException(status_code=422, detail="campaign_id_invalid")
+    try:
+        from harness_homebase_mcp import call_tool
+
+        result = call_tool(
+            "homebase_campaign_fleet_read",
+            {"root": str(PLUGIN_ROOT), "operation": "campaign", "campaign_id": safe_id},
+        )
+        structured = result.get("structuredContent") or {}
+    except Exception as exc:  # pragma: no cover - defensive API boundary
+        reason = "campaign_not_found" if type(exc).__name__ == "CampaignNotFound" else f"fleet unavailable: {type(exc).__name__}"
+        return {
+            "schema": "sips.fleet.campaign.v1",
+            "available": False,
+            "reason": reason,
+            "campaign_id": safe_id,
+            "generated_at": _now(),
+            "claim_boundary": "The fleet read failed before producing campaign detail.",
+        }
+
+    raw_data = structured.get("data")
+    data = raw_data if isinstance(raw_data, dict) else {}
+    if not data:
+        return {
+            "schema": "sips.fleet.campaign.v1",
+            "available": False,
+            "reason": "campaign_not_found",
+            "campaign_id": safe_id,
+            "generated_at": _now(),
+            "claim_boundary": "No campaign spine matched that id.",
+        }
+
+    children_out: list[dict[str, Any]] = []
+    for child in (data.get("children") or [])[:20]:
+        if not isinstance(child, dict):
+            continue
+        children_out.append(
+            {
+                "child_id": str(child.get("child_id") or child.get("id") or "")[:80],
+                "title": str(child.get("title") or child.get("objective") or "")[:220],
+                "role": str(child.get("role") or "")[:40],
+                "thread_id": str(child.get("thread_id") or "")[:80],
+                "status": str(child.get("status") or "")[:40],
+                "archived": bool(child.get("archived_at")),
+                "objective": str(child.get("objective") or "")[:220],
+                "summary": str(child.get("summary") or "")[:300],
+                "incarnation_count": int(child.get("incarnation_count") or 0),
+            }
+        )
+    activity_out = [
+        {
+            "kind": str(entry.get("event_type") or entry.get("kind") or "")[:40],
+            "at": str(entry.get("timestamp") or entry.get("at") or "")[:40],
+            "detail": str(entry.get("reason") or entry.get("summary") or "")[:200],
+            "child_id": str(entry.get("child_id") or "")[:80],
+            "status": str(entry.get("status") or "")[:40],
+        }
+        for entry in (data.get("activity") or [])[-10:]
+        if isinstance(entry, dict)
+    ]
+    return {
+        "schema": "sips.fleet.campaign.v1",
+        "available": True,
+        "campaign_id": str(data.get("campaign_id") or safe_id)[:80],
+        "objective": str(data.get("objective") or "")[:320],
+        "status": str(data.get("status") or "unknown")[:40],
+        "status_reason": str(data.get("status_reason") or "")[:120],
+        "revision": int(data.get("revision") or 0),
+        "child_count": int(data.get("child_count") or 0),
+        "visible_child_count": int(data.get("visible_child_count") or 0),
+        "runtime_run_id": str(data.get("runtime_run_id") or "")[:80],
+        "workspace_root": str(data.get("workspace_root") or "")[:300],
+        "tags": [str(t)[:40] for t in (data.get("tags") or [])[:6] if isinstance(t, (str, int))],
+        "children": children_out,
+        "activity": activity_out,
+        "generated_at": _now(),
+        "claim_boundary": "Children are metadata pointers; their conversations live in the host, not here.",
     }
 
 
