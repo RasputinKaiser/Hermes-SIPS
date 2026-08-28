@@ -30,8 +30,8 @@ from sips_paths import goal_state_path, harness_home, hook_events_path  # noqa: 
 try:
     from memory_fabric_jsonl import load_records, store_path  # noqa: E402
 except Exception:  # pragma: no cover - memory is optional at runtime
-    load_records = None
-    store_path = None
+    load_records = None  # type: ignore[assignment]
+    store_path = None  # type: ignore[assignment]
 
 router = APIRouter()
 
@@ -892,6 +892,15 @@ def get_run_detail(run_id: str) -> dict[str, Any]:
             continue
         spec = item.get("spec") if isinstance(item.get("spec"), dict) else {}
         result = item.get("result") if isinstance(item.get("result"), dict) else {}
+        # Gate evidence rides each task receipt as {name: {ok, evidence[]}};
+        # project to name -> ok|failed so the panel renders pass/fail chips
+        # without leaking evidence paths or payloads.
+        gates_out: dict[str, str] = {}
+        raw_gates = result.get("gates")
+        if isinstance(raw_gates, dict):
+            for gate_name, gate in list(raw_gates.items())[:6]:
+                if isinstance(gate, dict) and gate.get("ok") is not None:
+                    gates_out[str(gate_name)[:40]] = "ok" if gate.get("ok") else "failed"
         tasks_out.append(
             {
                 "id": str(item.get("id") or spec.get("id") or "")[:60],
@@ -900,6 +909,8 @@ def get_run_detail(run_id: str) -> dict[str, Any]:
                 "attempts": int(item.get("attempts") or 0),
                 "description": str(spec.get("description") or "")[:220],
                 "answer": str(result.get("summary") or "")[:300],
+                "gates": gates_out,
+                "has_lesson": bool(result.get("lesson_candidate")),
             }
         )
     budget_usage = status_data.get("budget_usage")

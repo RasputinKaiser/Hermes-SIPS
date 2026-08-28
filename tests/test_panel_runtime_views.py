@@ -435,6 +435,66 @@ def test_fleet_campaign_detail_projects_children_and_activity(sips_home: Path, m
     assert "event_type" not in view["activity"][0]  # renamed to kind
 
 
+def test_run_detail_projects_gates_and_lesson(sips_home: Path) -> None:
+    """Gate evidence {name: {ok}} and lesson_candidate project to bounded chips."""
+    import subprocess
+
+    env = dict(os.environ, SIPS_HOME=str(sips_home))
+    cli = str(_REPO_ROOT / "scripts" / "sips_runtime.py")
+
+    def _cli(op: str, payload: dict) -> dict:
+        proc = subprocess.run(
+            ["python3", cli, "write", "--op", op, "--json", json.dumps(payload)],
+            check=True, env=env, capture_output=True, text=True,
+        )
+        return json.loads(proc.stdout)
+
+    _cli("create", {
+        "run_id": "h-gates",
+        "objective": "gate projection run",
+        "idempotency_key": "h-gates:create",
+        "expected_revision": 0,
+        "tasks": [{"id": "task-g", "objective": "gated task",
+                   "estimated_tokens": 8000, "retry_limit": 1}],
+    })
+    _cli("submit", {"run_id": "h-gates", "idempotency_key": "h-gates:submit", "expected_revision": 1})
+    _cli("lease", {"run_id": "h-gates", "owner": "tester", "task_id": "task-g",
+                   "idempotency_key": "h-gates:lease", "expected_revision": 2})
+    # The CLI's write response is a flat summary; the fencing token lives on
+    # the task.leased event, which advance must present back.
+    fencing = None
+    events_path = sips_home / "runtime" / "v1" / "runs" / "h-gates" / "events.jsonl"
+    for line in events_path.read_text(encoding="utf-8").splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if event.get("event_type") == "task.leased" and str((event.get("payload") or {}).get("task_id")) == "task-g":
+            fencing = ((event.get("payload") or {}).get("lease") or {}).get("fencing_token")
+    assert fencing is not None, "task.leased event must carry a fencing_token"
+    _cli("advance", {
+        "run_id": "h-gates", "task_id": "task-g", "owner": "tester",
+        "idempotency_key": "h-gates:advance", "expected_revision": 3,
+        "fencing_token": fencing,
+        "status": "succeeded",
+        "summary": "did the gated thing",
+        # The runtime validates evidence (status + anchor + count) and requires
+        # every gate in GATE_ORDER to pass on advance, so a real receipt is
+        # all-passing with all five gates present.
+        "gates": {name: {"ok": True, "evidence": [
+            {"status": "passed", "evidence_path": str(sips_home / f"{name}.jsonl"), "count": 1}]}
+            for name in ("integrity", "correctness", "regression", "resource", "benefit")},
+        "lesson_candidate": {"title": "learned a thing"},
+    })
+
+    view = plugin_api.get_run_detail("h-gates")
+    assert view["available"] is True
+    task = next(t for t in view["tasks"] if t["id"] == "task-g")
+    assert task["gates"] == {name: "ok" for name in ("integrity", "correctness", "regression", "resource", "benefit")}
+    assert task["has_lesson"] is True
+    assert task["answer"] == "did the gated thing"
+
+
 def test_runs_projects_task_progress_from_events(sips_home: Path) -> None:
     """Per-run progress derives from run.created specs + task.* events."""
     _write_events(
