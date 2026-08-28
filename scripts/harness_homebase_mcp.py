@@ -1535,6 +1535,29 @@ def runtime_tool_payload(root: Path, operation: str, request_json: str, *, write
     return dict(result)
 
 
+def _latest_runtime_run_id(root: Path) -> str:
+    """Return the most recently modified runtime run ID, or ``''`` if none exist.
+
+    The session bridge writes one runtime run per Hermes session under
+    ``$SIPS_HOME/runtime/v1/runs``; picking the latest by mtime makes the Goal
+    Board show live session work without callers needing to know run IDs.
+    """
+    try:
+        runs_dir = root / "runtime" / "v1" / "runs"
+        candidates = [entry for entry in runs_dir.iterdir() if entry.is_dir()]
+    except OSError:
+        return ""
+    best: tuple[float, str] = (0.0, "")
+    for entry in candidates:
+        try:
+            mtime = entry.stat().st_mtime
+        except OSError:
+            continue
+        if mtime > best[0]:
+            best = (mtime, entry.name)
+    return best[1]
+
+
 def goal_board_payload(
     root: Path,
     run_id: str,
@@ -1543,6 +1566,8 @@ def goal_board_payload(
     campaign_id: str = "",
 ) -> dict[str, Any]:
     """Read the current Goal Board without requiring the caller to know a run ID."""
+    if not run_id:
+        run_id = _latest_runtime_run_id(root)
     if run_id:
         request: dict[str, Any] = {
             "run_id": run_id,

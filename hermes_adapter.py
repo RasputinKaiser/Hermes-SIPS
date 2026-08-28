@@ -251,6 +251,12 @@ def _translated_tool(kwargs: dict[str, Any]) -> tuple[str, dict[str, Any]]:
 def _on_session_start(**kwargs: Any) -> None:
     configure_environment()
     sid = _session_id(kwargs)
+    try:
+        from sips_session_bridge import start_session
+
+        start_session(sid, _cwd(kwargs))
+    except Exception:
+        logger.debug("SIPS runtime session start skipped", exc_info=True)
     result = _run_script(
         "improvement_injector.py",
         {"hook_event_name": "SessionStart", "session_id": sid, "cwd": _cwd(kwargs)},
@@ -345,6 +351,12 @@ def _on_post_tool_call(**kwargs: Any) -> None:
                 "SIPS escalation advisor (advisory):\n" + json.dumps(feedback, ensure_ascii=False),
                 "escalation_advisor",
             )
+    try:
+        from sips_session_bridge import record_tool_call
+
+        record_tool_call(sid)
+    except Exception:
+        logger.debug("SIPS runtime beat skipped", exc_info=True)
     _record_event("post_tool_call", kwargs, status="ok" if success is not False else "failed")
 
 
@@ -418,6 +430,19 @@ def _on_session_end(**kwargs: Any) -> None:
     metrics = _update_session(sid)
     _record_learning(sid, kwargs, metrics)
     _record_event("on_session_end", kwargs, status="ok", metrics={k: metrics.get(k, 0) for k in ("turns", "tool_calls", "edits", "failures")})
+    try:
+        from sips_session_bridge import finish_session
+
+        finish_session(
+            sid,
+            completed=True,
+            turns=metrics.get("turns", 0),
+            tool_calls=metrics.get("tool_calls", 0),
+            failures=metrics.get("failures", 0),
+            exit_reason="session_end",
+        )
+    except Exception:
+        logger.debug("SIPS runtime session end skipped", exc_info=True)
 
 
 def _on_session_finalize(**kwargs: Any) -> None:
