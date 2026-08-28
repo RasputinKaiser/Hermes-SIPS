@@ -952,6 +952,105 @@ def get_fleet_campaign(campaign_id: str) -> dict[str, Any]:
     }
 
 
+@router.post("/fleet/create")
+def post_fleet_create(body: dict[str, Any]) -> dict[str, Any]:
+    """Create a campaign spine (bounded, validated write via the fleet registry)."""
+    data = body if isinstance(body, dict) else {}
+    objective = str(data.get("objective") or "").strip()
+    if not objective:
+        raise HTTPException(status_code=422, detail="objective_required")
+    campaign_id = str(data.get("campaign_id") or "").strip() or None
+    if campaign_id and (len(campaign_id) > 80 or any(ch in campaign_id for ch in "/\\ \t")):
+        raise HTTPException(status_code=422, detail="campaign_id_invalid")
+    tags_raw = data.get("tags")
+    tags = [str(t).strip()[:40] for t in tags_raw[:6] if str(t).strip()] if isinstance(tags_raw, list) else []
+    try:
+        from harness_homebase_mcp import call_tool
+
+        request: dict[str, Any] = {"objective": objective[:2000], "tags": tags}
+        if campaign_id:
+            request["campaign_id"] = campaign_id
+        result = call_tool(
+            "homebase_campaign_fleet_write",
+            {"root": str(PLUGIN_ROOT), "operation": "create", "request_json": json.dumps(request)},
+        )
+        structured = result.get("structuredContent") or {}
+    except Exception as exc:
+        return {
+            "schema": "sips.fleet.write.v1",
+            "available": False,
+            "reason": f"fleet write failed: {type(exc).__name__}",
+            "generated_at": _now(),
+            "claim_boundary": "The fleet write failed before producing state.",
+        }
+    raw_campaign = structured.get("data")
+    campaign = raw_campaign if isinstance(raw_campaign, dict) else {}
+    return {
+        "schema": "sips.fleet.write.v1",
+        "available": True,
+        "campaign_id": str(campaign.get("campaign_id") or campaign_id or "")[:80],
+        "objective": str(campaign.get("objective") or objective)[:320],
+        "status": str(campaign.get("status") or "unknown")[:40],
+        "revision": int(campaign.get("revision") or 0),
+        "generated_at": _now(),
+        "claim_boundary": "Campaign spine created; attach children via POST /fleet/attach.",
+    }
+
+
+@router.post("/fleet/attach")
+def post_fleet_attach(body: dict[str, Any]) -> dict[str, Any]:
+    """Attach a child thread to a campaign spine (bounded, validated write)."""
+    data = body if isinstance(body, dict) else {}
+    campaign_id = str(data.get("campaign_id") or "").strip()
+    title = str(data.get("title") or "").strip()
+    if not campaign_id or len(campaign_id) > 80 or any(ch in campaign_id for ch in "/\\"):
+        raise HTTPException(status_code=422, detail="campaign_id_invalid")
+    if not title:
+        raise HTTPException(status_code=422, detail="title_required")
+    role = str(data.get("role") or "Worker").strip()
+    if role not in {"Worker", "Scout", "Judge", "Reviewer"}:
+        raise HTTPException(status_code=422, detail="role_invalid")
+    objective = str(data.get("objective") or "").strip()[:2000]
+    summary = str(data.get("summary") or "").strip()[:2000]
+    thread_id = str(data.get("thread_id") or "").strip()[:80]
+    try:
+        from harness_homebase_mcp import call_tool
+
+        request: dict[str, Any] = {"campaign_id": campaign_id, "title": title[:220], "role": role}
+        if objective:
+            request["objective"] = objective
+        if summary:
+            request["summary"] = summary
+        if thread_id:
+            request["thread_id"] = thread_id
+        result = call_tool(
+            "homebase_campaign_fleet_write",
+            {"root": str(PLUGIN_ROOT), "operation": "attach", "request_json": json.dumps(request)},
+        )
+        structured = result.get("structuredContent") or {}
+    except Exception as exc:
+        reason = "campaign_not_found" if type(exc).__name__ == "CampaignNotFound" else f"fleet write failed: {type(exc).__name__}"
+        return {
+            "schema": "sips.fleet.write.v1",
+            "available": False,
+            "reason": reason,
+            "campaign_id": campaign_id,
+            "generated_at": _now(),
+            "claim_boundary": "The fleet write failed before producing state.",
+        }
+    raw_campaign = structured.get("data")
+    campaign = raw_campaign if isinstance(raw_campaign, dict) else {}
+    return {
+        "schema": "sips.fleet.write.v1",
+        "available": True,
+        "campaign_id": str(campaign.get("campaign_id") or campaign_id)[:80],
+        "child_count": int(campaign.get("child_count") or 0),
+        "revision": int(campaign.get("revision") or 0),
+        "generated_at": _now(),
+        "claim_boundary": "Child attached as metadata; the conversation lives in the host, not here.",
+    }
+
+
 @router.get("/routes")
 def get_routes() -> dict[str, Any]:
     try:

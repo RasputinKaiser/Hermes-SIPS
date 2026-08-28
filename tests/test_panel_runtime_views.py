@@ -245,6 +245,54 @@ def test_runtime_read_tool_status_and_events(sips_home: Path, tmp_path: Path, mo
     assert payload_none["error"] == "no runtime runs exist"
 
 
+def test_fleet_create_and_attach_writes(sips_home: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Write endpoints create spines and attach children via the real registry."""
+    import harness_homebase_mcp as h
+
+    monkeypatch.setattr(plugin_api, "PLUGIN_ROOT", tmp_path)
+
+    created = plugin_api.post_fleet_create({"objective": "write test campaign", "campaign_id": "write-test-1", "tags": ["test"]})
+    assert created["available"] is True
+    assert created["campaign_id"] == "write-test-1"
+    assert created["status"] == "active"
+    assert created["revision"] == 1
+
+    attached = plugin_api.post_fleet_attach({"campaign_id": "write-test-1", "title": "child one", "role": "Scout", "objective": "scout"})
+    assert attached["available"] is True
+    assert attached["child_count"] == 1
+    assert attached["revision"] == 2
+
+    # the list endpoint now sees the campaign
+    fleet = plugin_api.get_fleet()
+    assert any(c["campaign_id"] == "write-test-1" for c in fleet["campaigns"])
+
+
+def test_fleet_write_validation_rejects_bad_input(sips_home: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(plugin_api, "PLUGIN_ROOT", tmp_path)
+
+    with pytest.raises(HTTPException) as e1:
+        plugin_api.post_fleet_create({"objective": ""})
+    assert e1.value.status_code == 422
+    with pytest.raises(HTTPException) as e2:
+        plugin_api.post_fleet_create({"objective": "x", "campaign_id": "bad/id"})
+    assert e2.value.status_code == 422
+    with pytest.raises(HTTPException) as e3:
+        plugin_api.post_fleet_attach({"campaign_id": "c1", "title": ""})
+    assert e3.value.status_code == 422
+    with pytest.raises(HTTPException) as e4:
+        plugin_api.post_fleet_attach({"campaign_id": "c1", "title": "t", "role": "Emperor"})
+    assert e4.value.status_code == 422
+
+
+def test_fleet_attach_unknown_campaign_degrades(sips_home: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(plugin_api, "PLUGIN_ROOT", tmp_path)
+    result = plugin_api.post_fleet_attach({"campaign_id": "no-such", "title": "x"})
+    assert result["available"] is False
+    assert result["reason"] == "campaign_not_found"
+
+
 def test_fleet_campaign_detail_rejects_traversal() -> None:
     from fastapi import HTTPException
 

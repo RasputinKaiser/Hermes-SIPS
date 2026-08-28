@@ -24,6 +24,7 @@ keywords = [
 [project.optional-dependencies]
 dev = [
   "pytest>=8",
+  "fastapi>=0.110",
 ]
 
 [project.urls]

@@ -132,6 +132,7 @@ const styles = {
   routeTool: { color: COLORS.muted, fontSize: '12px', textAlign: 'right' },
   feedback: { marginTop: '9px', padding: '9px 10px', borderRadius: '9px', border: `1px solid ${COLORS.border}`, background: 'rgba(0,0,0,0.10)', color: COLORS.muted, fontSize: '12px', lineHeight: 1.45 },
   feedbackError: { borderColor: COLORS.bad, color: COLORS.bad },
+  fleetComposer: { display: 'grid', gap: '8px', alignItems: 'start', padding: '10px 11px', border: `1px solid ${COLORS.border}`, borderRadius: '10px', background: 'rgba(0,0,0,0.10)' },
   // Signature element: the tab rail. Amplifies what the system already owns —
   // the accent token, the eyebrow's uppercase tracking, tabular numerals — at
   // full strength. Underline motif (like the header rule) instead of boxes.
@@ -549,14 +550,18 @@ function StateBadge({ value, tone }) {
   })
 }
 
-function Card({ title, icon, hint, lead = false, children }) {
+function Card({ title, icon, hint, lead = false, actions, children }) {
   return jsx('section', {
     style: { ...styles.card, ...(lead ? styles.moduleLead : styles.module) },
     'data-sips-card': true,
     'data-sips-lead': lead ? true : undefined,
     children: [
       jsx('div', { style: styles.screwPlate, 'aria-hidden': true, children: [jsx('span', { style: styles.screw }), jsx('span', { style: styles.screw })] }),
-      jsx('div', { style: styles.cardTitle, children: [jsx(Codicon, { name: icon, size: '0.95rem' }), jsx('span', { children: title })] }),
+      jsx('div', { style: styles.cardTitle, children: [
+        jsx(Codicon, { name: icon, size: '0.95rem' }),
+        jsx('span', { children: title }),
+        actions ? jsx('span', { style: { marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: '8px' }, children: actions }) : null
+      ] }),
       hint ? jsx('div', { style: styles.cardHint, children: hint }) : null,
       children
     ]
@@ -1683,7 +1688,8 @@ function FleetDetail({ api, campaignId }) {
         ] }),
         jsx('span', { style: styles.eventTime, children: formatRelativeTimestamp(entry.at) })
       ] }, `activity-${index}`))
-    ] }) : null
+    ] }) : null,
+    jsx(AttachChildComposer, { api, campaignId })
   ] })
 }
 
@@ -1733,6 +1739,189 @@ function RunsCard({ api }) {
   })
 }
 
+// Server error surfaces are already short codes ('objective_required',
+// 'campaign_id_invalid', 'campaign_not_found', …). One source of truth so the
+// inline feedback line renders the same shape for both composers.
+function fleetWriteErrorText(result, error) {
+  if (error) return `Fleet write failed: ${error.message || 'unknown error'}`
+  if (result && result.available === false) return `Fleet write failed: ${result.reason || 'unknown reason'}`
+  return 'Fleet write failed: unknown error'
+}
+
+// --- Fleet composers -------------------------------------------------------
+// Write surface for the campaign fleet: a 'New Campaign' composer in the card
+// header row and an 'Attach child' composer inside the expanded campaign
+// detail. Inputs stay exactly as typed; they clear only after the server
+// confirms available:true (skill contract: clear inputs only on success).
+
+const FLEET_ROLES = ['Worker', 'Scout', 'Judge', 'Reviewer']
+
+function FleetComposerFeedback({ feedback, error }) {
+  if (!feedback) return null
+  return jsx('div', { style: { ...styles.feedback, ...(error ? styles.feedbackError : {}) }, children: feedback })
+}
+
+function NewCampaignComposer({ api }) {
+  const [open, setOpen] = useState(false)
+  const [objective, setObjective] = useState('')
+  const [campaignId, setCampaignId] = useState('')
+  const [tags, setTags] = useState('')
+  const [feedback, setFeedback] = useState(null)
+  const [feedbackError, setFeedbackError] = useState(false)
+  const mutation = useSipsMutation(api, {
+    invalidateKeys: ['fleet'],
+    onSuccess: (result) => {
+      if (result?.available) {
+        setFeedback(`Campaign ${result.campaign_id || '(unnamed)'} created`)
+        setFeedbackError(false)
+        setOpen(false)
+        setObjective('')
+        setCampaignId('')
+        setTags('')
+      } else {
+        setFeedback(fleetWriteErrorText(result))
+        setFeedbackError(true)
+      }
+    },
+    onError: (error) => {
+      setFeedback(fleetWriteErrorText(null, error))
+      setFeedbackError(true)
+    }
+  })
+  const busy = mutation.isPending || mutation.isLoading
+  const submit = () => {
+    setFeedback(null)
+    setFeedbackError(false)
+    const body = { objective: objective.trim() }
+    const trimmedId = campaignId.trim()
+    if (trimmedId) body.campaign_id = trimmedId
+    const tagList = tags.split(',').map((tag) => tag.trim()).filter(Boolean)
+    if (tagList.length) body.tags = tagList
+    mutation.mutate({ path: '/fleet/create', body })
+  }
+
+  return jsxs('div', { children: [
+    jsx(Button, {
+      variant: 'outline',
+      size: 'sm',
+      onClick: () => { setFeedback(null); setFeedbackError(false); setOpen((value) => !value) },
+      children: open ? 'Cancel' : 'New Campaign'
+    }),
+    open ? jsxs('div', { style: { ...styles.fleetComposer, marginTop: '8px' }, children: [
+      jsx('input', {
+        style: { ...styles.input, width: '100%' },
+        value: objective,
+        placeholder: 'Objective (required)…',
+        'aria-label': 'New campaign objective',
+        onChange: (event) => setObjective(event.target.value),
+        onKeyDown: (event) => { if (event.key === 'Enter' && objective.trim() && !busy) submit() }
+      }),
+      jsx('input', {
+        style: { ...styles.input, width: '100%' },
+        value: campaignId,
+        placeholder: 'auto-generated if blank',
+        'aria-label': 'New campaign id (optional)',
+        onChange: (event) => setCampaignId(event.target.value),
+        onKeyDown: (event) => { if (event.key === 'Enter' && objective.trim() && !busy) submit() }
+      }),
+      jsx('input', {
+        style: { ...styles.input, width: '100%' },
+        value: tags,
+        placeholder: 'comma,separated,tags',
+        'aria-label': 'New campaign tags (optional)',
+        onChange: (event) => setTags(event.target.value),
+        onKeyDown: (event) => { if (event.key === 'Enter' && objective.trim() && !busy) submit() }
+      }),
+      jsxs('div', { style: styles.controlRow, children: [
+        jsx(Button, {
+          variant: 'outline',
+          size: 'sm',
+          disabled: busy || !objective.trim(),
+          onClick: submit,
+          children: busy ? 'Creating…' : 'Create campaign'
+        }),
+        jsx(Button, { variant: 'ghost', size: 'sm', disabled: busy, onClick: () => setOpen(false), children: 'Cancel' })
+      ] })
+    ] }) : null,
+    jsx(FleetComposerFeedback, { feedback: open ? null : feedback, error: feedbackError })
+  ] })
+}
+
+function AttachChildComposer({ api, campaignId }) {
+  const [title, setTitle] = useState('')
+  const [role, setRole] = useState('Worker')
+  const [objective, setObjective] = useState('')
+  const [feedback, setFeedback] = useState(null)
+  const [feedbackError, setFeedbackError] = useState(false)
+  const mutation = useSipsMutation(api, {
+    invalidateKeys: ['fleet-detail', 'fleet'],
+    onSuccess: (result) => {
+      if (result?.available) {
+        setFeedback(`Child "${title.trim()}" attached`)
+        setFeedbackError(false)
+        setTitle('')
+        setRole('Worker')
+        setObjective('')
+      } else {
+        setFeedback(fleetWriteErrorText(result))
+        setFeedbackError(true)
+      }
+    },
+    onError: (error) => {
+      setFeedback(fleetWriteErrorText(null, error))
+      setFeedbackError(true)
+    }
+  })
+  const busy = mutation.isPending || mutation.isLoading
+  const submit = () => {
+    setFeedback(null)
+    setFeedbackError(false)
+    const body = { campaign_id: campaignId, title: title.trim(), role }
+    const trimmedObjective = objective.trim()
+    if (trimmedObjective) body.objective = trimmedObjective
+    mutation.mutate({ path: '/fleet/attach', body })
+  }
+
+  return jsxs('div', { style: { ...styles.fleetComposer, marginTop: '4px' }, children: [
+    jsx('div', { style: styles.drillLabel, children: 'Attach child' }),
+    jsx('input', {
+      style: { ...styles.input, width: '100%' },
+      value: title,
+      placeholder: 'Child title (required)…',
+      'aria-label': 'Attach child title',
+      onChange: (event) => setTitle(event.target.value),
+      onKeyDown: (event) => { if (event.key === 'Enter' && title.trim() && !busy) submit() }
+    }),
+    jsxs('div', { style: { ...styles.controlRow, marginTop: '2px' }, children: [
+      FLEET_ROLES.map((value) => jsx(Button, {
+        key: value,
+        variant: role === value ? 'solid' : 'outline',
+        size: 'sm',
+        disabled: busy,
+        onClick: () => setRole(value),
+        style: { minHeight: '26px', padding: '0 9px', fontSize: '12px' },
+        children: value
+      }))
+    ] }),
+    jsx('input', {
+      style: { ...styles.input, width: '100%' },
+      value: objective,
+      placeholder: 'Objective (optional)…',
+      'aria-label': 'Attach child objective',
+      onChange: (event) => setObjective(event.target.value),
+      onKeyDown: (event) => { if (event.key === 'Enter' && title.trim() && !busy) submit() }
+    }),
+    jsx(Button, {
+      variant: 'outline',
+      size: 'sm',
+      disabled: busy || !title.trim(),
+      onClick: submit,
+      children: busy ? 'Attaching…' : 'Attach child'
+    }),
+    jsx(FleetComposerFeedback, { feedback, error: feedbackError })
+  ] })
+}
+
 function FleetCard({ api }) {
   const query = useQuery({ queryKey: ['sips-control-plane', 'fleet'], queryFn: () => api.rest('/fleet'), refetchInterval: 30000 })
   const [expandedId, setExpandedId] = useState(null)
@@ -1752,22 +1941,14 @@ function FleetCard({ api }) {
   }
 
   const campaigns = fleet.campaigns || []
-  if (!campaigns.length) {
-    return jsx(Card, {
-      title: 'Campaign fleet',
-      icon: 'layers',
-      hint: 'Backed by campaign fleet spines in the graph runtime.',
-      children: jsx('div', { style: styles.unavailable, children: 'No campaigns yet — fleet spines appear when campaign work starts.' })
-    })
-  }
-
   return jsx(Card, {
     title: `Fleet · ${compactNumber(fleet.total ?? campaigns.length)}`,
     icon: 'layers',
     hint: 'Campaign spines and their child threads; click a campaign to expand its detail.',
+    actions: jsx(NewCampaignComposer, { api }),
     children: jsx('div', {
       style: styles.routeGrid,
-      children: campaigns.map((campaign, index) => jsx(DrillDownRow, {
+      children: campaigns.length ? campaigns.map((campaign, index) => jsx(DrillDownRow, {
         id: campaign.campaign_id || `campaign-${index}`,
         expanded: expandedId === (campaign.campaign_id || `campaign-${index}`),
         onToggle: toggleExpanded,
@@ -1786,7 +1967,7 @@ function FleetCard({ api }) {
           campaign.objective ? jsx('div', { style: styles.listSecondary, title: campaign.objective, children: campaign.objective }) : null,
           (campaign.tags || []).length ? jsx('div', { style: styles.listTags, children: campaign.tags.map((tag) => jsx(Badge, { key: tag, variant: 'outline', style: styles.metaBadge, children: tag })) }) : null
         ]
-      }, `campaign-${campaign.campaign_id || index}`))
+      }, `campaign-${campaign.campaign_id || index}`)) : jsx('div', { style: styles.unavailable, children: 'No campaigns yet — create one with New Campaign above, or wait for fleet spines to appear.' })
     })
   })
 }
