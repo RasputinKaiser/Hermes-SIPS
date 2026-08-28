@@ -145,6 +145,106 @@ def test_fleet_campaign_detail_not_found(sips_home: Path) -> None:
     assert view["campaign_id"] == "no-such-campaign"
 
 
+def test_run_detail_projects_tasks_events_budgets(sips_home: Path) -> None:
+    """Detail must mirror the runtime read API shapes (probed 2026-08-28)."""
+    import subprocess
+
+    env = dict(os.environ, SIPS_HOME=str(sips_home))
+    cli = str(_REPO_ROOT / "scripts" / "sips_runtime.py")
+
+    def _cli(op: str, payload: dict) -> None:
+        subprocess.run(
+            ["python3", cli, "write", "--op", op, "--json", json.dumps(payload)],
+            check=True, env=env, capture_output=True, text=True,
+        )
+
+    _cli("create", {
+        "run_id": "h-detail",
+        "objective": "detail test run",
+        "idempotency_key": "h-detail:create",
+        "expected_revision": 0,
+        "tasks": [{
+            "id": "task-a", "objective": "task a objective",
+            "estimated_tokens": 50000, "retry_limit": 3,
+            "resource_estimates": {"tool_calls": 16, "retrieval_tokens": 512},
+        }],
+        "soft_budget": 200000, "hard_budget": 400000,
+    })
+    _cli("submit", {"run_id": "h-detail", "idempotency_key": "h-detail:submit", "expected_revision": 1})
+
+    view = plugin_api.get_run_detail("h-detail")
+    assert view["available"] is True
+    assert view["run_id"] == "h-detail"
+    assert view["status"] in {"created", "running", "leased"}  # submit may auto-lease
+    assert view["objective"] == "detail test run"
+    assert view["budgets"]["hard_limit"] == 400000
+    task_ids = [t["id"] for t in view["tasks"]]
+    assert "task-a" in task_ids
+    task = next(t for t in view["tasks"] if t["id"] == "task-a")
+    assert task["objective"] == "task a objective"
+    assert view["events"], "events projected"
+    assert view["events"][0]["type"] == "run.created"
+    assert "timestamp" not in view["events"][0]  # renamed to at
+
+
+def test_run_detail_unknown_run(sips_home: Path) -> None:
+    view = plugin_api.get_run_detail("h-does-not-exist")
+    assert view["available"] is False
+    assert "unknown run" in view["reason"]
+
+
+def test_runtime_read_tool_status_and_events(sips_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """homebase_runtime_read: auto-discovery, events limit, invalid op rejection."""
+    import subprocess
+
+    import harness_homebase_mcp as h
+
+    env = dict(os.environ, SIPS_HOME=str(sips_home))
+    cli = str(_REPO_ROOT / "scripts" / "sips_runtime.py")
+
+    def _cli(op: str, payload: dict) -> None:
+        subprocess.run(
+            ["python3", cli, "write", "--op", op, "--json", json.dumps(payload)],
+            check=True, env=env, capture_output=True, text=True,
+        )
+
+    _cli("create", {
+        "run_id": "h-tool", "objective": "tool probe", "idempotency_key": "h-tool:create",
+        "expected_revision": 0,
+        "tasks": [{
+            "id": "t1", "objective": "t", "estimated_tokens": 50000, "retry_limit": 3,
+            "resource_estimates": {"tool_calls": 16, "retrieval_tokens": 512},
+        }],
+        "soft_budget": 200000, "hard_budget": 400000,
+    })
+    _cli("submit", {"run_id": "h-tool", "idempotency_key": "h-tool:submit", "expected_revision": 1})
+
+    # no run_id -> auto-discover the run just created
+    payload = h.runtime_read_payload(tmp_path, "status", "")
+    assert payload["ok"] is True
+    assert payload["run_id"] == "h-tool"
+    assert payload["data"]["objective"] == "tool probe"
+    assert payload["data"]["budgets"]["hard_limit"] == 400000
+
+    # events with limit
+    payload_ev = h.runtime_read_payload(tmp_path, "events", "h-tool", 2)
+    assert payload_ev["ok"] is True
+    assert payload_ev["count"] == 2
+    assert all(set(e) == {"event_type", "timestamp", "revision", "actor"} for e in payload_ev["data"])
+
+    # unknown run degrades to ok:false, not an exception
+    payload_bad = h.runtime_read_payload(tmp_path, "status", "h-nope")
+    assert payload_bad["ok"] is False
+    assert "unknown run" in payload_bad["error"]
+
+    # empty runs root -> explicit error (SIPS_HOME must point at the empty dir;
+    # _latest_runtime_run_id reads the env-resolved root, not its argument)
+    monkeypatch.setenv("SIPS_HOME", str(tmp_path / "empty-home"))
+    payload_none = h.runtime_read_payload(tmp_path.parent, "status", "")
+    assert payload_none["ok"] is False
+    assert payload_none["error"] == "no runtime runs exist"
+
+
 def test_fleet_campaign_detail_rejects_traversal() -> None:
     from fastapi import HTTPException
 

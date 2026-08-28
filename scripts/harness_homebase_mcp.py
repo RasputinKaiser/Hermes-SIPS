@@ -356,6 +356,24 @@ TOOLS: list[dict[str, Any]] = [
         "annotations": {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False},
     },
     {
+        "name": "homebase_runtime_read",
+        "title": "SIPS Runtime Read",
+        "description": "Read graph-runtime state for one run: status with budgets, or the bounded event trail. Pair with homebase_goal_board for the rendered board view.",
+        "inputSchema": object_schema(
+            {
+                "root": ROOT_PROPERTY,
+                "operation": {
+                    "type": "string",
+                    "enum": ["status", "events"],
+                    "description": "Read run status (with tasks and budgets) or the event trail.",
+                },
+                "run_id": {"type": "string", "description": "Runtime run ID. If omitted, the latest run is used."},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100, "description": "Maximum events for the events operation. Defaults to 15."},
+            }
+        ),
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False},
+    },
+    {
         "name": "homebase_campaign_fleet_read",
         "title": "SIPS Campaign Fleet Read",
         "description": "Read campaign spines, searchable child-thread metadata, archive summaries, and recent fleet activity.",
@@ -1562,6 +1580,50 @@ def _latest_runtime_run_id(root: Path) -> str:
     return best[1]
 
 
+def runtime_read_payload(root: Path, operation: str, run_id: str, limit: int = 15) -> dict[str, Any]:
+    """Read one run's status or event trail via the graph-runtime read API."""
+    if not run_id:
+        run_id = _latest_runtime_run_id(root)
+    if not run_id:
+        return {"ok": False, "operation": operation, "error": "no runtime runs exist"}
+    request: dict[str, Any] = {"run_id": run_id}
+    if operation == "events":
+        request["limit"] = max(1, min(int(limit), 100))
+    from sips_runtime.api import RuntimeAPI
+
+    result = RuntimeAPI().read(operation, request)
+    data = result.get("data") if isinstance(result.get("data"), (dict, list)) else ({} if operation == "status" else [])
+    if not result.get("ok"):
+        return {"ok": False, "operation": operation, "run_id": run_id, "error": str(result.get("error") or "read_failed")}
+    events = data if operation == "events" and isinstance(data, list) else None
+    if events is not None:
+        trimmed = [
+            {
+                "event_type": str(e.get("event_type") or "")[:40],
+                "timestamp": str(e.get("timestamp") or "")[:40],
+                "revision": int(e.get("revision") or 0),
+                "actor": str(e.get("actor") or "")[:40],
+            }
+            for e in events[-limit:]
+            if isinstance(e, dict)
+        ]
+        return {
+            "ok": True,
+            "operation": operation,
+            "run_id": run_id,
+            "count": len(trimmed),
+            "data": trimmed,
+            "claim_boundary": "Bounded event summary; full event payloads stay in the runtime store.",
+        }
+    return {
+        "ok": True,
+        "operation": operation,
+        "run_id": run_id,
+        "data": data,
+        "claim_boundary": "Read-only runtime state; task results are summaries, not full evidence.",
+    }
+
+
 def goal_board_payload(
     root: Path,
     run_id: str,
@@ -2162,6 +2224,15 @@ def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
             goal_board_markdown(payload),
             is_error=payload.get("ok") is not True,
         )
+    if name == "homebase_runtime_read":
+        operation = str(arguments.get("operation") or "status").strip().lower()
+        if operation not in {"status", "events"}:
+            raise JsonRpcError(-32602, "operation must be 'status' or 'events'")
+        limit = int(arguments.get("limit") or 15)
+        if not 1 <= limit <= 100:
+            raise JsonRpcError(-32602, "limit must be between 1 and 100")
+        payload = runtime_read_payload(root, operation, str(arguments.get("run_id") or ""), limit)
+        return tool_result(payload, render(payload, "SIPS Runtime Read"), is_error=not payload.get("ok", False))
     if name == "homebase_campaign_fleet_read":
         payload = campaign_fleet_read_payload(arguments)
         return tool_result(payload, campaign_fleet_markdown(payload, title="SIPS Campaign Fleet"))

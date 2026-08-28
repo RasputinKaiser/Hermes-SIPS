@@ -784,6 +784,89 @@ def get_fleet() -> dict[str, Any]:
     }
 
 
+@router.get("/runs/{run_id}")
+def get_run_detail(run_id: str) -> dict[str, Any]:
+    """Bounded detail of one runtime session run: status, tasks, and events.
+
+    Backed by the graph runtime's read API (status/events), the same source the
+    CLI uses — read-only, safe identifiers only.
+    """
+    safe_id = run_id.strip()[:80]
+    try:
+        from sips_runtime.api import RuntimeAPI
+    except Exception as exc:  # pragma: no cover - defensive API boundary
+        return {
+            "schema": "sips.run.detail.v1",
+            "available": False,
+            "reason": f"runtime unavailable: {type(exc).__name__}",
+            "run_id": safe_id,
+            "generated_at": _now(),
+            "claim_boundary": "The runtime read failed before producing run detail.",
+        }
+
+    api = RuntimeAPI()
+    status_read = api.read("status", {"run_id": safe_id})
+    if not status_read.get("ok"):
+        return {
+            "schema": "sips.run.detail.v1",
+            "available": False,
+            "reason": str(status_read.get("error") or "run_not_found"),
+            "run_id": safe_id,
+            "generated_at": _now(),
+            "claim_boundary": "No runtime run matched that id.",
+        }
+
+    status_data = status_read.get("data") if isinstance(status_read.get("data"), dict) else {}
+    events_read = api.read("events", {"run_id": safe_id})
+    events_data = events_read.get("data")
+    raw_events = events_data if isinstance(events_data, list) else []
+    events_out = [
+        {
+            "type": str(e.get("event_type") or "")[:40],
+            "at": str(e.get("timestamp") or "")[:40],
+            "revision": int(e.get("revision") or 0),
+            "actor": str(e.get("actor") or "")[:40],
+        }
+        for e in raw_events[-15:]
+        if isinstance(e, dict)
+    ]
+    raw_tasks = status_data.get("tasks")
+    task_items = raw_tasks.values() if isinstance(raw_tasks, dict) else (raw_tasks or [])
+    tasks_out: list[dict[str, Any]] = []
+    for item in list(task_items)[:8]:
+        if not isinstance(item, dict):
+            continue
+        spec = item.get("spec") if isinstance(item.get("spec"), dict) else {}
+        result = item.get("result") if isinstance(item.get("result"), dict) else {}
+        tasks_out.append(
+            {
+                "id": str(item.get("id") or spec.get("id") or "")[:60],
+                "objective": str(spec.get("objective") or item.get("objective") or "")[:320],
+                "status": str(item.get("status") or "")[:40],
+                "attempts": int(item.get("attempts") or 0),
+                "description": str(spec.get("description") or "")[:220],
+                "answer": str(result.get("summary") or "")[:300],
+            }
+        )
+    budget_usage = status_data.get("budget_usage")
+    budgets = status_data.get("budgets")
+    return {
+        "schema": "sips.run.detail.v1",
+        "available": True,
+        "run_id": str(status_data.get("run_id") or safe_id)[:80],
+        "status": str(status_data.get("status") or "unknown")[:40],
+        "objective": str(status_data.get("objective") or "")[:320],
+        "revision": int(status_data.get("revision") or 0),
+        "workspace_root": str(status_data.get("workspace_root") or "")[:300],
+        "budgets": {str(k)[:40]: int(v) for k, v in (budgets or {}).items() if isinstance(v, int)},
+        "budget_usage": {str(k)[:40]: int(v) for k, v in (budget_usage or {}).items() if isinstance(v, int)},
+        "tasks": tasks_out,
+        "events": events_out,
+        "generated_at": _now(),
+        "claim_boundary": "Read-only projection of one runtime run; event payloads stay in the runtime store.",
+    }
+
+
 @router.get("/fleet/{campaign_id}")
 def get_fleet_campaign(campaign_id: str) -> dict[str, Any]:
     """Bounded detail view of one campaign spine, including attached children."""

@@ -335,7 +335,24 @@ const styles = {
   listId: { fontSize: '12px', fontWeight: 650, fontFamily: 'ui-monospace, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   listMeta: { display: 'inline-flex', alignItems: 'center', gap: '10px', flexShrink: 0 },
   listSecondary: { color: COLORS.muted, fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  listTags: { display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }
+  listTags: { display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' },
+  // Drill-down rows (Runs/Fleet): clickable summary row + lazy detail panel.
+  drillRow: { display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, padding: '2px 6px', margin: '-2px -6px', borderRadius: '8px', cursor: 'pointer', textAlign: 'left' },
+  drillBody: { display: 'grid', gap: '4px', minWidth: 0, flex: 1 },
+  drillChevron: { display: 'inline-flex', alignItems: 'center', color: COLORS.muted, flexShrink: 0, transition: 'transform 150ms ease' },
+  drillPanel: { margin: '4px 0 6px', padding: '10px 11px', border: `1px solid ${COLORS.border}`, borderRadius: '10px', background: 'rgba(0,0,0,0.10)', display: 'grid', gap: '9px' },
+  drillStack: { display: 'grid', gap: '9px', minWidth: 0 },
+  drillHead: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', minWidth: 0 },
+  drillObjective: { fontSize: '12px', fontWeight: 650, minWidth: 0, lineHeight: 1.4 },
+  drillMeta: { color: COLORS.muted, fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' },
+  drillLabel: { color: COLORS.muted, fontSize: '12px' },
+  drillReason: { color: COLORS.muted, fontSize: '12px', lineHeight: 1.45 },
+  taskRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', minWidth: 0 },
+  taskMeta: { display: 'inline-flex', alignItems: 'center', gap: '8px', flexShrink: 0 },
+  taskAttempts: { color: COLORS.muted, fontSize: '12px', fontVariantNumeric: 'tabular-nums', flexShrink: 0 },
+  eventRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '10px', minWidth: 0 },
+  eventType: { fontSize: '12px', fontWeight: 650, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  childRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', minWidth: 0 }
 }
 
 function toneFor(value) {
@@ -1520,8 +1537,160 @@ function runStatusTone(status) {
   return 'muted'
 }
 
+// --- Drill-down helpers ------------------------------------------------------
+// Shared expand/collapse + lazy-detail-fetch used by RunsCard and FleetCard.
+// Only ONE row is expanded per card: clicking another row collapses the first;
+// clicking the expanded row again collapses it. Detail fetches are gated by
+// useQuery `enabled`, so collapsed rows cost nothing.
+
+function DrillDownRow({ id, expanded, onToggle, children, detail }) {
+  return jsx('div', { children: [
+    jsxs('div', {
+      role: 'button',
+      tabIndex: 0,
+      'aria-expanded': expanded,
+      onClick: () => onToggle(id),
+      onKeyDown: (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onToggle(id) } },
+      style: styles.drillRow,
+      children: [
+        jsx('span', {
+          'aria-hidden': true,
+          style: { ...styles.drillChevron, transform: expanded ? 'rotate(90deg)' : 'none' },
+          children: jsx(Codicon, { name: 'chevron-right', size: '0.8rem' })
+        }),
+        jsx('div', { style: styles.drillBody, children })
+      ]
+    }),
+    expanded ? jsx('div', { style: styles.drillPanel, children: detail }) : null
+  ] }, `drill-${id}`)
+}
+
+function truncateMiddle(text, max = 48) {
+  const value = String(text || '')
+  if (value.length <= max) return value
+  const head = Math.ceil((max - 1) / 2)
+  const tail = Math.floor((max - 1) / 2)
+  return `${value.slice(0, head)}…${value.slice(value.length - tail)}`
+}
+
+function compactBudgets(budgets, usage) {
+  const budgetEntries = Object.entries(budgets || {})
+  if (!budgetEntries.length) return null
+  return budgetEntries
+    .map(([key, hard]) => {
+      const charged = (usage || {})[key]
+      return `${key} ${charged === undefined ? '—' : compactNumber(charged)} / ${compactNumber(hard)}`
+    })
+    .join(' · ')
+}
+
+function RunDetail({ api, runId }) {
+  const query = useQuery({
+    queryKey: ['sips-control-plane', 'run-detail', runId],
+    queryFn: () => api.rest(`/runs/${encodeURIComponent(runId)}`),
+    enabled: Boolean(runId),
+    staleTime: 15000,
+    refetchInterval: 30000
+  })
+
+  if (query.isLoading) {
+    return jsx('div', { style: { display: 'grid', placeItems: 'center', padding: '6px 0' }, children: jsx(Loader, { type: 'lemniscate-bloom' }) })
+  }
+  const detail = query.data
+  if (!detail?.available) {
+    return jsx('div', { style: styles.drillReason, children: detail?.reason || 'Run detail is unavailable.' })
+  }
+  const budgetsLine = compactBudgets(detail.budgets, detail.budget_usage)
+  const tasks = detail.tasks || []
+  const events = (detail.events || []).slice() // chronological; most recent last
+
+  return jsxs('div', { style: styles.drillStack, children: [
+    jsx('div', { style: styles.drillHead, children: [
+      jsx(StateBadge, { value: detail.status, tone: runStatusTone(detail.status) }),
+      detail.objective ? jsx('span', { style: styles.drillObjective, title: detail.objective, children: detail.objective }) : null
+    ] }),
+    detail.revision !== undefined ? jsx('div', { style: styles.drillMeta, children: `revision ${detail.revision}` }) : null,
+    detail.workspace_root ? jsx('div', { style: styles.drillMeta, title: detail.workspace_root, children: truncateMiddle(detail.workspace_root) }) : null,
+    budgetsLine ? jsx('div', { style: styles.drillMeta, children: budgetsLine }) : null,
+    tasks.length ? jsxs('div', { style: styles.drillStack, children: [
+      jsx('div', { style: styles.drillLabel, children: 'Tasks' }),
+      ...tasks.map((task, index) => jsxs('div', { style: styles.taskRow, children: [
+        jsx('span', { style: styles.listId, title: task.id, children: task.id || '?' }),
+        jsxs('span', { style: styles.taskMeta, children: [
+          jsx(StateBadge, { value: task.status }),
+          Number(task.attempts) > 0 ? jsx('span', { style: styles.taskAttempts, children: `${task.attempts} attempt${Number(task.attempts) === 1 ? '' : 's'}` }) : null
+        ] })
+      ] }, `task-${task.id || index}`))
+    ] }) : null,
+    events.length ? jsxs('div', { style: styles.drillStack, children: [
+      jsx('div', { style: styles.drillLabel, children: 'Event trail' }),
+      ...events.map((event, index) => jsxs('div', { style: styles.eventRow, children: [
+        jsx('span', { style: styles.eventType, title: event.type, children: formatStatus(event.type) }),
+        jsx('span', { style: styles.eventTime, children: formatRelativeTimestamp(event.at) })
+      ] }, `event-${index}`))
+    ] }) : null
+  ] })
+}
+
+function FleetDetail({ api, campaignId }) {
+  const query = useQuery({
+    queryKey: ['sips-control-plane', 'fleet-detail', campaignId],
+    queryFn: () => api.rest(`/fleet/${encodeURIComponent(campaignId)}`),
+    enabled: Boolean(campaignId),
+    staleTime: 15000,
+    refetchInterval: 30000
+  })
+
+  if (query.isLoading) {
+    return jsx('div', { style: { display: 'grid', placeItems: 'center', padding: '6px 0' }, children: jsx(Loader, { type: 'lemniscate-bloom' }) })
+  }
+  const detail = query.data
+  if (!detail?.available) {
+    return jsx('div', { style: styles.drillReason, children: detail?.reason || 'Campaign detail is unavailable.' })
+  }
+  const children = detail.children || []
+  const activity = (detail.activity || []).slice().reverse() // most recent last
+
+  return jsxs('div', { style: styles.drillStack, children: [
+    jsxs('div', { style: styles.drillHead, children: [
+      jsx(StateBadge, { value: detail.status }),
+      detail.status_reason ? jsx('span', { style: styles.drillMeta, title: detail.status_reason, children: formatStatus(detail.status_reason) }) : null,
+      detail.objective ? jsx('span', { style: styles.drillObjective, title: detail.objective, children: detail.objective }) : null
+    ] }),
+    detail.revision !== undefined ? jsx('div', { style: styles.drillMeta, children: `revision ${detail.revision}` }) : null,
+    detail.runtime_run_id || detail.workspace_root ? jsx('div', {
+      style: styles.drillMeta,
+      title: [detail.runtime_run_id, detail.workspace_root].filter(Boolean).join(' · '),
+      children: [detail.runtime_run_id ? `run ${truncateMiddle(detail.runtime_run_id, 24)}` : null, detail.workspace_root ? truncateMiddle(detail.workspace_root) : null].filter(Boolean).join(' · ')
+    }) : null,
+    children.length ? jsxs('div', { style: styles.drillStack, children: [
+      jsx('div', { style: styles.drillLabel, children: 'Children' }),
+      ...children.map((child, index) => jsxs('div', { style: styles.childRow, children: [
+        jsx('span', { style: styles.listId, title: child.title || child.child_id, children: child.title || child.child_id || '?' }),
+        jsxs('span', { style: styles.taskMeta, children: [
+          Number(child.incarnation_count) > 1 ? jsx('span', { style: styles.taskAttempts, children: `×${child.incarnation_count}` }) : null,
+          child.archived ? jsx(Badge, { variant: 'outline', style: styles.metaBadge, children: 'archived' }) : null,
+          jsx(Badge, { variant: 'outline', style: { ...styles.metaBadge, color: COLORS.accent, borderColor: COLORS.accent }, children: child.role || 'child' })
+        ] })
+      ] }, `child-${child.child_id || index}`))
+    ] }) : null,
+    activity.length ? jsxs('div', { style: styles.drillStack, children: [
+      jsx('div', { style: styles.drillLabel, children: 'Activity' }),
+      ...activity.map((entry, index) => jsxs('div', { style: styles.eventRow, children: [
+        jsxs('span', { style: styles.eventType, title: entry.detail, children: [
+          formatStatus(entry.kind),
+          entry.child_id ? jsx('span', { style: { ...styles.drillMeta, display: 'inline', marginLeft: '6px' }, children: entry.child_id }) : null
+        ] }),
+        jsx('span', { style: styles.eventTime, children: formatRelativeTimestamp(entry.at) })
+      ] }, `activity-${index}`))
+    ] }) : null
+  ] })
+}
+
 function RunsCard({ api }) {
   const query = useQuery({ queryKey: ['sips-control-plane', 'runs'], queryFn: () => api.rest('/runs'), refetchInterval: 30000 })
+  const [expandedId, setExpandedId] = useState(null)
+  const toggleExpanded = (id) => setExpandedId((current) => (current === id ? null : id))
 
   if (query.isLoading) {
     return jsx(Card, { title: 'Session runs', icon: 'history', children: jsx('div', { style: styles.unavailable, children: 'Reading session runs…' }) })
@@ -1540,11 +1709,14 @@ function RunsCard({ api }) {
   return jsx(Card, {
     title: `Runs · ${compactNumber(runs.total ?? entries.length)}`,
     icon: 'history',
-    hint: 'Most recent sessions first; status reflects the run lifecycle, not proof.',
+    hint: 'Most recent sessions first; click a run to expand its detail.',
     children: entries.length ? jsx('div', {
       style: styles.routeGrid,
-      children: entries.map((run, index) => jsxs('div', {
-        style: { ...styles.listRow, ...(index === entries.length - 1 ? { borderBottom: 'none' } : {}) },
+      children: entries.map((run, index) => jsx(DrillDownRow, {
+        id: run.run_id || `run-${index}`,
+        expanded: expandedId === (run.run_id || `run-${index}`),
+        onToggle: toggleExpanded,
+        detail: jsx(RunDetail, { api, runId: run.run_id || `run-${index}` }),
         children: [
           jsx('div', { style: styles.listMain, children: [
             jsx('span', { style: styles.listId, title: run.run_id, children: run.run_id || '?' }),
@@ -1563,6 +1735,8 @@ function RunsCard({ api }) {
 
 function FleetCard({ api }) {
   const query = useQuery({ queryKey: ['sips-control-plane', 'fleet'], queryFn: () => api.rest('/fleet'), refetchInterval: 30000 })
+  const [expandedId, setExpandedId] = useState(null)
+  const toggleExpanded = (id) => setExpandedId((current) => (current === id ? null : id))
 
   if (query.isLoading) {
     return jsx(Card, { title: 'Campaign fleet', icon: 'layers', children: jsx('div', { style: styles.unavailable, children: 'Reading campaign fleet…' }) })
@@ -1590,11 +1764,14 @@ function FleetCard({ api }) {
   return jsx(Card, {
     title: `Fleet · ${compactNumber(fleet.total ?? campaigns.length)}`,
     icon: 'layers',
-    hint: 'Campaign spines and their child threads; listing does not prove campaign health.',
+    hint: 'Campaign spines and their child threads; click a campaign to expand its detail.',
     children: jsx('div', {
       style: styles.routeGrid,
-      children: campaigns.map((campaign, index) => jsxs('div', {
-        style: { ...styles.listRow, ...(index === campaigns.length - 1 ? { borderBottom: 'none' } : {}) },
+      children: campaigns.map((campaign, index) => jsx(DrillDownRow, {
+        id: campaign.campaign_id || `campaign-${index}`,
+        expanded: expandedId === (campaign.campaign_id || `campaign-${index}`),
+        onToggle: toggleExpanded,
+        detail: jsx(FleetDetail, { api, campaignId: campaign.campaign_id || `campaign-${index}` }),
         children: [
           jsx('div', { style: styles.listMain, children: [
             jsx('span', { style: styles.listId, title: campaign.campaign_id, children: campaign.campaign_id || '?' }),
