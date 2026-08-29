@@ -754,8 +754,22 @@ def get_runs() -> dict[str, Any]:
         progress["active"] += max(0, task_total - len(task_states))
         mtime = events_path.stat().st_mtime
         annotations = _read_run_annotations(run_dir)
+        # Terminal detection: 'task.result' is the legacy marker; real session
+        # streams end with task.advanced carrying a terminal status. A run
+        # whose every declared task reached a terminal state is done even if
+        # the run itself never emitted a distinct terminal event.
+        seen_terminal = {"succeeded", "failed", "blocked", "canceled"}
+        seen_failed = {"failed", "blocked", "canceled"}
+        terminal_reached = (
+            task_total > 0
+            and len(task_states) >= task_total
+            and all(state in seen_terminal for state in task_states.values())
+        )
         if last_event == "task.result":
             status = "succeeded"
+        elif terminal_reached:
+            # Run-level status: failed if any task failed, else succeeded.
+            status = "failed" if any(state in seen_failed for state in task_states.values()) else "succeeded"
         elif not submitted:
             status = "created"
         elif time.time() - mtime > 6 * 3600:

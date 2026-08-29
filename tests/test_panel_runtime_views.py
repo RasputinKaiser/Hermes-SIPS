@@ -187,6 +187,40 @@ def test_run_detail_projects_tasks_events_budgets(sips_home: Path) -> None:
     assert "timestamp" not in view["events"][0]  # renamed to at
 
 
+def test_runs_terminal_advanced_marks_run_succeeded(sips_home: Path) -> None:
+    """A run whose every task hit a terminal task.advanced is done, not running."""
+    _write_events(
+        "h-terminal",
+        [
+            {"event_type": "run.created", "payload": {"objective": "done run", "tasks": [{"id": "t1"}]}},
+            {"event_type": "run.submitted", "payload": {}},
+            {"event_type": "task.leased", "payload": {"task_id": "t1"}},
+            {"event_type": "task.advanced", "payload": {"task_id": "t1", "result": {"status": "succeeded"}}},
+        ],
+        sips_home,
+    )
+    view = plugin_api.get_runs()
+    run = next(r for r in view["runs"] if r["run_id"] == "h-terminal")
+    assert run["status"] == "succeeded"
+    assert view["active"] == 0
+
+
+def test_runs_terminal_advanced_with_failure_marks_failed(sips_home: Path) -> None:
+    _write_events(
+        "h-termfail",
+        [
+            {"event_type": "run.created", "payload": {"objective": "failed run", "tasks": [{"id": "a"}, {"id": "b"}]}},
+            {"event_type": "run.submitted", "payload": {}},
+            {"event_type": "task.advanced", "payload": {"task_id": "a", "result": {"status": "succeeded"}}},
+            {"event_type": "task.advanced", "payload": {"task_id": "b", "result": {"status": "failed"}}},
+        ],
+        sips_home,
+    )
+    view = plugin_api.get_runs()
+    run = next(r for r in view["runs"] if r["run_id"] == "h-termfail")
+    assert run["status"] == "failed"
+
+
 def test_run_detail_unknown_run(sips_home: Path) -> None:
     view = plugin_api.get_run_detail("h-does-not-exist")
     assert view["available"] is False
