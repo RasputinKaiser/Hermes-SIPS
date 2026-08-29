@@ -560,6 +560,22 @@ function toneColor(value) {
   return COLORS[toneFor(value)] || COLORS.muted
 }
 
+// Unicode block sparkline (▁▂▃▄▅▆▇█) over the 24h lifecycle histogram
+// ({hour, events} points, oldest -> newest). Returns { chars, title } or null
+// when there are fewer than two points. Series shorter than 8 chars are
+// left-padded with baseline blocks so the shape stays readable.
+function histogramSparkline(histogram) {
+  const points = (Array.isArray(histogram) ? histogram : [])
+    .map((col) => ({ hour: String(col?.hour || ''), events: Number(col?.events) || 0 }))
+  if (points.length < 2) return null
+  const blocks = '▁▂▃▄▅▆▇█'
+  const max = Math.max(...points.map((point) => point.events), 1)
+  let chars = points.map((point) => blocks[Math.min(blocks.length - 1, Math.round((point.events / max) * (blocks.length - 1)))]).join('')
+  if (chars.length < 8) chars = blocks[0].repeat(8 - chars.length) + chars
+  const peak = points.reduce((best, point) => (point.events > best.events ? point : best), points[0])
+  return { chars, title: `24h activity · peak ${peak.hour} (${peak.events} event${peak.events === 1 ? '' : 's'})` }
+}
+
 function StateBadge({ value, tone }) {
   const color = tone ? COLORS[tone] : toneColor(value)
 
@@ -694,14 +710,22 @@ function Breaker({ title, badge, summary, boundary, action, defaultOpen = false 
 }
 
 
-function Signal({ label, value, detail, tone = 'accent', progress, trend, trendUnit = 'pts' }) {
+function Signal({ label, value, detail, tone = 'accent', progress, trend, trendUnit = 'pts', spark }) {
   const color = tone === 'accent' ? COLORS.accent : toneColor(tone)
 
   return jsx('div', {
     style: styles.signal,
     children: [
       jsx('div', { style: styles.signalLabel, children: label }),
-      jsx('div', { style: { ...styles.signalValue, color }, children: value }),
+      jsxs('div', { style: { ...styles.signalValue, color, display: 'flex', alignItems: 'baseline', gap: '8px', minWidth: 0 }, children: [
+        jsx('span', { style: { fontVariantNumeric: 'tabular-nums' }, children: value }),
+        spark ? jsx('span', {
+          title: spark.title,
+          'aria-label': spark.title,
+          style: { fontFamily: 'var(--ui-mono, ui-monospace, monospace)', fontSize: '12px', fontWeight: 400, color: COLORS.muted, letterSpacing: '1px', lineHeight: 1, flexShrink: 0 },
+          children: spark.chars
+        }) : null
+      ] }),
       jsx('div', { style: styles.signalDetail, title: detail, children: detail }),
       progress === undefined ? null : jsx('div', {
         style: styles.signalTrack,
@@ -779,6 +803,7 @@ function StatusOverview({ data, history, updatedAt, isFetching, fetchError, self
   const surfaceTrend = history.map((sample) => sample.surfaceTotal)
   const memoryTrend = history.map((sample) => sample.memoryVerified)
   const lifecycleTrend = history.map((sample) => sample.lifecycle)
+  const lifecycleSpark = histogramSparkline(data?.lifecycle?.histogram)
 
   // --- Living Proof layer -------------------------------------------------
   const orbRef = useRef(null)
@@ -892,7 +917,7 @@ function StatusOverview({ data, history, updatedAt, isFetching, fetchError, self
           jsx(Signal, { label: 'Proof coverage', value: `${posture.coverage}%`, detail: `${posture.readyProof} of ${posture.totalProof || 0} layers ready`, tone: posture.tone, progress: posture.coverage, trend: proofTrend }),
           jsx(Signal, { label: 'Surface area', value: compactNumber(surfaceTotal), detail: `${trendLabel(surfaceTrend, '')} · declared capabilities`, trend: surfaceTrend, trendUnit: '' }),
           jsx(Signal, { label: 'Memory verified', value: compactNumber(memory.verified_or_active_count || 0), detail: memory.available ? `${compactNumber(memory.record_count || 0)} total records` : 'memory unavailable', tone: memory.available ? 'good' : 'warn', trend: memoryTrend, trendUnit: '' }),
-          jsx(Signal, { label: 'Lifecycle', value: compactNumber(data?.events?.event_count || 0), detail: `${trendLabel(lifecycleTrend, '')} · recorded events`, trend: lifecycleTrend, trendUnit: '' })
+          jsx(Signal, { label: 'Lifecycle', value: compactNumber(data?.events?.event_count || 0), detail: `${trendLabel(lifecycleTrend, '')} · recorded events`, trend: lifecycleTrend, trendUnit: '', spark: lifecycleSpark })
         ]
       })
     ]
@@ -1500,6 +1525,80 @@ function HistoryCard({ api }) {
         ]
       }, `hist-${entry.completed_at}-${index}`)
     }) })
+  })
+}
+
+// Gate matrix: per-run verification receipts from /gate-matrix. One dense row
+// per recent run (newest first), one cell per gate colored by outcome. Runs
+// without a receipt (active/legacy) carry all-null gates and read as
+// 'not yet gated' rather than as a pass or a failure.
+function GateMatrixCard({ api }) {
+  const query = useQuery({ queryKey: ['sips-control-plane', 'gate-matrix'], queryFn: () => api.rest('/gate-matrix'), refetchInterval: pollInterval(30000) })
+  const title = 'Gate matrix'
+  const icon = 'verified'
+
+  if (query.isLoading) {
+    return jsx(Card, { title, icon, children: jsx('div', { style: styles.unavailable, children: 'Reading gate receipts…' }) })
+  }
+  if (query.isError || !query.data?.available) {
+    return jsx(Card, {
+      title,
+      icon,
+      hint: 'Per-run gate outcomes from verification receipts.',
+      children: jsx('div', { style: styles.unavailable, children: query.data?.reason || 'The gate matrix is unavailable right now.' })
+    })
+  }
+
+  const data = query.data
+  const gates = data.gates || []
+  const runs = (data.runs || []).slice(0, 12)
+  const gatedRuns = runs.filter((run) => run.receipt)
+  const cleanRuns = gatedRuns.filter((run) => !run.failed_count).length
+  const gateColor = (state) => state === 'ok' ? COLORS.good : state === 'failed' ? COLORS.bad : state === 'partial' ? COLORS.warn : COLORS.muted
+  const gateText = (state) => state === 'ok' ? 'ok' : state === 'failed' ? 'FAIL' : state === 'partial' ? 'part' : state === 'skipped' ? 'skip' : state === 'unknown' ? '?' : '—'
+
+  const columns = `minmax(0, 1fr) repeat(${Math.max(gates.length, 1)}, 38px) minmax(76px, auto)`
+  const headStyle = { ...styles.label, fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em', textAlign: 'center', borderBottom: `1px solid ${COLORS.border}`, paddingBottom: '4px' }
+  const cells = [
+    jsx('div', { key: 'gm-h-run', style: { ...headStyle, textAlign: 'left' }, children: 'run' }),
+    ...gates.map((gate) => jsx('div', { key: `gm-h-${gate}`, style: headStyle, children: gate.slice(0, 4) })),
+    jsx('div', { key: 'gm-h-count', style: headStyle, children: 'ok·fail' })
+  ]
+  for (const run of runs) {
+    const gated = Boolean(run.receipt)
+    cells.push(jsx('div', {
+      key: `gm-run-${run.run_id}`,
+      title: `${run.run_id} · ${formatRelativeTimestamp(run.updated_at)}${gated ? '' : ' · not yet gated'}`,
+      style: { fontSize: '11px', fontFamily: 'var(--ui-mono, ui-monospace, monospace)', color: gated ? COLORS.text : COLORS.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+      children: run.run_id
+    }, `gm-run-${run.run_id}`))
+    for (const gate of gates) {
+      const state = gated ? run.gates?.[gate] : null
+      cells.push(jsx('div', {
+        key: `gm-${run.run_id}-${gate}`,
+        title: `${run.run_id} · ${gate}: ${state || 'not yet gated'}`,
+        style: { fontSize: '10px', fontFamily: 'var(--ui-mono, ui-monospace, monospace)', color: gateColor(state), textAlign: 'center', fontVariantNumeric: 'tabular-nums' },
+        children: gated ? gateText(state) : '—'
+      }, `gm-${run.run_id}-${gate}`))
+    }
+    cells.push(jsx('div', {
+      key: `gm-count-${run.run_id}`,
+      title: gated ? `${run.run_id} · ${run.ok_count || 0} ok, ${run.failed_count || 0} failed` : `${run.run_id} · not yet gated`,
+      style: gated
+        ? { fontSize: '11px', fontVariantNumeric: 'tabular-nums', color: run.failed_count ? COLORS.bad : COLORS.muted, textAlign: 'right', whiteSpace: 'nowrap' }
+        : { ...styles.label, fontSize: '10px', textAlign: 'right', whiteSpace: 'nowrap' },
+      children: gated ? `${run.ok_count || 0}·${run.failed_count || 0}` : 'not yet gated'
+    }, `gm-count-${run.run_id}`))
+  }
+
+  return jsx(Card, {
+    title,
+    icon,
+    hint: `${gatedRuns.length}/${runs.length} runs gated · ${cleanRuns} clean · ${data.claim_boundary || ''}`,
+    children: runs.length ? jsx('div', {
+      style: { display: 'grid', gridTemplateColumns: columns, gap: '3px 6px', alignItems: 'center', minWidth: 0 },
+      children: cells
+    }) : jsx('div', { style: styles.unavailable, children: 'No runs recorded yet — the matrix fills as runs complete.' })
   })
 }
 
@@ -3285,7 +3384,8 @@ function Dashboard({ api }) {
         jsx('div', { style: styles.supportGrid, children: [
           jsx(HistoryCard, { api }),
           jsx(ProofCard, { proof: data.proof_layers, actionState }),
-          jsx(RoutesCard, { api })
+          jsx(RoutesCard, { api }),
+          jsx(GateMatrixCard, { api })
         ] })
       ] }) : null,
       activeTab === 'memory' ? jsxs('div', { style: styles.supportGrid, children: [
