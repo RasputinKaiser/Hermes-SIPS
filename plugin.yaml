@@ -9,6 +9,8 @@ platforms:
   - macos
 provides_tools:
   - homebase_status
+  - homebase_lifecycle
+  - homebase_board_snapshot
   - homebase_verify
   - homebase_route
   - homebase_repo_map
@@ -25,6 +27,7 @@ provides_tools:
   - homebase_perception_plan
   - homebase_tool_factory
   - sips_runtime_read
+  - homebase_runtime_read
   - homebase_goal_board
   - homebase_campaign_fleet_read
   - homebase_campaign_fleet_write

@@ -341,6 +341,30 @@ TOOLS: list[dict[str, Any]] = [
         "annotations": {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False},
     },
     {
+        "name": "homebase_lifecycle",
+        "title": "SIPS Lifecycle Lens",
+        "description": "Bounded aggregation of the agent hook stream: per-tool outcome counts, session rollups, denied/blocked events, and an hourly activity histogram. Metadata only — tool arguments and payloads are never exposed.",
+        "inputSchema": object_schema(
+            {
+                "root": ROOT_PROPERTY,
+                "window": {"type": "integer", "minimum": 100, "maximum": 5000, "description": "Maximum recent hook events to aggregate. Defaults to 2000."},
+            }
+        ),
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False},
+    },
+    {
+        "name": "homebase_board_snapshot",
+        "title": "SIPS Board Snapshot",
+        "description": "One compact snapshot joining the Goal Board projection, current goal state, and the lifecycle posture: what SIPS observes, plans, executes, verifies, and records right now.",
+        "inputSchema": object_schema(
+            {
+                "root": ROOT_PROPERTY,
+                "run_id": {"type": "string", "description": "Optional runtime run ID. If omitted, the latest run is used."},
+            }
+        ),
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False},
+    },
+    {
         "name": "homebase_goal_board",
         "title": "SIPS Goal Board",
         "description": "Show the read-only Clonk-style Goal Board with one foreground action, explicit task states, suggestions, and bounded event deltas.",
@@ -1902,40 +1926,49 @@ def runtime_markdown(payload: dict[str, Any], title: str) -> str:
 LIFECYCLE_WINDOW = 2000  # max hook events scanned for the status lifecycle section
 
 
-def lifecycle_summary(root: Path | None = None) -> dict[str, Any]:
-    """Bounded lifecycle lens over the agent hook stream (metadata only)."""
+def lifecycle_summary(root: Path | None = None, window: int = LIFECYCLE_WINDOW) -> dict[str, Any]:
+    """Bounded lifecycle lens over the agent hook stream (metadata only).
+
+    ``root`` overrides the SIPS home directory that holds hook_events.jsonl;
+    by default the SIPS_HOME-aware hook_events_path() decides.
+    """
     path = hook_events_path() if root is None else root / "hook_events.jsonl"
+    if not path.is_file():
+        return {"available": False, "window_events": 0, "tools": [], "sessions": [], "histogram": []}
     events: list[dict[str, Any]] = []
     try:
-        if path.is_file():
-            lines = path.read_text(encoding="utf-8").splitlines()
-            for line in lines[-LIFECYCLE_WINDOW:]:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    item = json.loads(line)
-                except ValueError:
-                    continue
-                if isinstance(item, dict):
-                    events.append(item)
+        lines = path.read_text(encoding="utf-8").splitlines()
+        for line in lines[-max(1, int(window)):]:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                item = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(item, dict):
+                events.append(item)
     except OSError:
-        return {"available": False, "window_events": 0, "tools": [], "sessions": []}
+        return {"available": False, "window_events": 0, "tools": [], "sessions": [], "histogram": []}
 
     tool_counts: dict[str, int] = {}
     tool_errors: dict[str, int] = {}
     session_counts: dict[str, int] = {}
+    histogram: dict[str, int] = {}
     for item in events:
         event = str(item.get("event") or "")
         tool = str(item.get("tool_name") or "")[:40]
         status = str(item.get("status") or "")
         session_id = str(item.get("session_id") or "")[:48]
+        timestamp = item.get("timestamp") or item.get("ts")
         if tool and event in ("pre_tool_call", "post_tool_call"):
             tool_counts[tool] = tool_counts.get(tool, 0) + 1
             if status in ("error", "failed", "denied", "blocked"):
                 tool_errors[tool] = tool_errors.get(tool, 0) + 1
         if session_id and session_id != "unknown":
             session_counts[session_id] = session_counts.get(session_id, 0) + 1
+        if isinstance(timestamp, str) and len(timestamp) >= 13:
+            histogram[timestamp[:13]] = histogram.get(timestamp[:13], 0) + 1
 
     tools = sorted(tool_counts.items(), key=lambda kv: (-kv[1], kv[0]))[:8]
     sessions = sorted(session_counts.items(), key=lambda kv: (-kv[1], kv[0]))[:5]
@@ -1944,8 +1977,106 @@ def lifecycle_summary(root: Path | None = None) -> dict[str, Any]:
         "window_events": len(events),
         "tools": [{"tool": tool, "total": total, "issues": tool_errors.get(tool, 0)} for tool, total in tools],
         "sessions": [{"session_id": session, "events": count} for session, count in sessions],
+        "histogram": [{"hour": hour, "events": count} for hour, count in sorted(histogram.items())[-24:]],
         "claim_boundary": "Lifecycle lens summarizes hook stream metadata only; tool arguments and payloads are excluded.",
     }
+
+
+def lifecycle_markdown(payload: dict[str, Any], title: str = "SIPS Lifecycle Lens") -> str:
+    lines = [f"# {title}", ""]
+    if not payload.get("available"):
+        lines.append("- **status** `unavailable` — no hook stream found at the SIPS home.")
+        return "\n".join(lines).rstrip() + "\n"
+    lines.append(f"- **window events** `{payload.get('window_events', 0)}`")
+    for row in payload.get("tools") or []:
+        issues = row.get("issues") or 0
+        suffix = f" ({issues} issues)" if issues else ""
+        lines.append(f"- **{row.get('tool')}** `{row.get('total', 0)} calls{suffix}`")
+    for row in payload.get("sessions") or []:
+        lines.append(f"- **session** `{row.get('session_id')}` events=`{row.get('events', 0)}`")
+    histogram = payload.get("histogram") or []
+    if histogram:
+        first, last = histogram[0], histogram[-1]
+        peak = max(histogram, key=lambda col: col.get("events", 0))
+        lines.append(f"- **activity window (UTC)** `{first.get('hour')}` -> `{last.get('hour')}` peak=`{peak.get('hour')} ({peak.get('events')} events)`")
+    lines.append("")
+    lines.append(f"- {payload.get('claim_boundary', '')}")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def board_snapshot_payload(root: Path, run_id: str = "") -> dict[str, Any]:
+    """Join the Goal Board projection, goal state, and lifecycle posture."""
+    board = goal_board_payload(root, run_id, None, 12)
+    board_data = board.get("data") if isinstance(board.get("data"), dict) else {}
+
+    goal: dict[str, Any] = {}
+    command = [sys.executable, str(root / "scripts" / "goal_state.py"), "status"]
+    try:
+        completed = subprocess.run(command, cwd=str(root), check=False, text=True, capture_output=True, timeout=10)
+        data = json.loads(completed.stdout) if completed.stdout.strip() else {}
+        if isinstance(data, dict):
+            goal = {key: data.get(key) for key in ("status", "mode", "focus", "objective") if data.get(key) is not None}
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError, ValueError):
+        goal = {}
+
+    lifecycle = lifecycle_summary()
+    lifecycle_brief = {
+        "available": lifecycle.get("available", False),
+        "window_events": lifecycle.get("window_events", 0),
+        "top_tools": [
+            {"tool": row["tool"], "total": row["total"], "issues": row.get("issues", 0)}
+            for row in (lifecycle.get("tools") or [])[:3]
+        ],
+    }
+
+    return {
+        "schema": "sips.board-snapshot.v1",
+        "ok": board.get("ok") is True or bool(board_data),
+        "run_id": board_data.get("run_id") or run_id or None,
+        "board": {
+            "status": board_data.get("status"),
+            "objective": board_data.get("objective"),
+            "authority": board_data.get("authority"),
+            "progress": board_data.get("progress"),
+            "revision": board_data.get("revision"),
+        },
+        "goal": goal,
+        "lifecycle": lifecycle_brief,
+        "claim_boundary": (
+            "Snapshot is a read-only join of the Goal Board projection, persisted goal state, and hook-stream "
+            "metadata. It does not execute, verify, or authorize anything."
+        ),
+    }
+
+
+def board_snapshot_markdown(payload: dict[str, Any]) -> str:
+    lines = ["# SIPS Board Snapshot", ""]
+    board = payload.get("board") or {}
+    progress = board.get("progress") if isinstance(board.get("progress"), dict) else {}
+    if board.get("status"):
+        lines.append(f"- **board status** `{board.get('status')}`")
+    if board.get("objective"):
+        lines.append(f"- **objective** `{board.get('objective')}`")
+    if progress:
+        lines.append(f"- **progress** `{progress.get('complete', 0)}/{progress.get('total', 0)}`")
+    if board.get("revision") is not None:
+        lines.append(f"- **revision** `{board.get('revision')}`")
+    goal = payload.get("goal") or {}
+    for key in ("status", "mode", "focus"):
+        if goal.get(key):
+            lines.append(f"- **goal {key}** `{goal[key]}`")
+    lifecycle = payload.get("lifecycle") or {}
+    if lifecycle.get("available"):
+        lines.append(f"- **lifecycle window events** `{lifecycle.get('window_events', 0)}`")
+        for row in lifecycle.get("top_tools") or []:
+            issues = row.get("issues") or 0
+            suffix = f" ({issues} issues)" if issues else ""
+            lines.append(f"- **top tool** `{row.get('tool')} x{row.get('total', 0)}{suffix}`")
+    else:
+        lines.append("- **lifecycle** `unavailable`")
+    lines.append("")
+    lines.append(f"- {payload.get('claim_boundary', '')}")
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def render(payload: dict[str, Any], title: str) -> str:
@@ -2270,6 +2401,15 @@ def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
             runtime_markdown(payload, "SIPS Graph Runtime Read"),
             is_error=payload.get("ok") is not True,
         )
+    if name == "homebase_lifecycle":
+        window = int(arguments.get("window") or LIFECYCLE_WINDOW)
+        if not 100 <= window <= 5000:
+            raise JsonRpcError(-32602, "window must be between 100 and 5000")
+        payload = lifecycle_summary(None, window)
+        return tool_result(payload, lifecycle_markdown(payload))
+    if name == "homebase_board_snapshot":
+        payload = board_snapshot_payload(root, str(arguments.get("run_id") or "").strip())
+        return tool_result(payload, board_snapshot_markdown(payload), is_error=payload.get("ok") is not True)
     if name == "homebase_goal_board":
         since_revision = arguments.get("since_revision")
         if since_revision is not None:
