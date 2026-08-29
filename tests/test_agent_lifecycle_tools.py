@@ -130,7 +130,39 @@ def test_board_snapshot_degrades_without_goal_state(sips_root: Path) -> None:
     assert payload["claim_boundary"]
 
 
-def test_homebase_status_embeds_lifecycle_with_histogram(sips_root: Path) -> None:
+def test_lifecycle_markdown_renders_bars_and_sparkline(sips_root: Path) -> None:
+    _write_hook_events(
+        [
+            _hook_event(ts="2026-08-29T02:10:00+00:00"),
+            _hook_event(ts="2026-08-29T02:20:00+00:00"),
+            _hook_event(ts="2026-08-29T02:30:00+00:00"),
+            _hook_event(ts="2026-08-29T03:10:00+00:00"),
+        ],
+        sips_root,
+    )
+
+    result = hb.call_tool("homebase_lifecycle", {})
+    markdown = result["content"][0]["text"]
+
+    assert "█" in markdown  # tool bars
+    assert "▁" in markdown or "█" in markdown.split("**activity**")[1][:20]  # sparkline
+    assert "◐" in markdown  # session glyph
+
+
+def test_bar_of_max_gives_nonzero_values_a_visible_floor() -> None:
+    assert hb._bar_of_max(1, [100, 1]) == "█░░░░░░░░░"
+    assert hb._bar_of_max(100, [100, 1]) == "██████████"
+    assert hb._bar_of_max(0, [100, 1]) == "░░░░░░░░░░"
+
+
+def test_fmt_value_never_dumps_collections() -> None:
+    assert hb._fmt_value({"a": 1}) == "dict(1 keys)"
+    assert hb._fmt_value([1, 2, 3]) == "list(3 items)"
+    assert hb._fmt_value("x" * 200).endswith("…")
+    assert len(hb._fmt_value("x" * 200)) <= 91
+
+
+def test_homebase_status_renders_lifecycle_section(sips_root: Path) -> None:
     _write_hook_events([_hook_event()], sips_root)
 
     payload = hb.status_payload(sips_root)

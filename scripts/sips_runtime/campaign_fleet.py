@@ -705,6 +705,20 @@ class CampaignFleet:
         return self.list(query=query, include_archived=include_archived, limit=limit)
 
 
+def _child_glyph(status: Any) -> str:
+    """One-character fleet status glyph, self-contained for campaign_fleet."""
+    value = str(status or "").strip().lower()
+    if value in {"attached", "active", "running", "succeeded", "done"}:
+        return "◐" if value in {"attached", "active", "running"} else "✓"
+    if value in {"failed", "error", "stale", "blocked"}:
+        return "✗"
+    if value in {"pending", "planned", "queued"}:
+        return "○"
+    if value in {"archived", "closed"}:
+        return "✓"
+    return "◇"
+
+
 def campaign_markdown(projection: Mapping[str, Any], *, title: str = "SIPS Campaign Fleet") -> str:
     lines = [f"# {title}", ""]
     lines.append(f"- **campaign** `{projection.get('campaign_id', '')}`")
@@ -727,7 +741,8 @@ def campaign_markdown(projection: Mapping[str, Any], *, title: str = "SIPS Campa
             if not isinstance(child, Mapping):
                 continue
             thread = f" · thread `{child.get('thread_id')}`" if child.get("thread_id") else ""
-            lines.append(f"- `{child.get('id')}` {child.get('title', '')} — `{child.get('status', 'unknown')}`{thread}")
+            glyph = _child_glyph(child.get("status"))
+            lines.append(f"- {glyph} `{child.get('id')}` {child.get('title', '')} — `{child.get('status', 'unknown')}`{thread}")
     activity = projection.get("activity", []) if isinstance(projection.get("activity"), list) else []
     if activity:
         lines.extend(["", "## Recent activity", ""])

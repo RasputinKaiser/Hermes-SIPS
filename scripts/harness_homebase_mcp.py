@@ -1704,11 +1704,15 @@ def goal_board_payload(
 def goal_board_markdown(payload: dict[str, Any]) -> str:
     data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
     lines = ["# SIPS Goal Board", ""]
-    lines.append(f"- **status** `{data.get('status', 'unknown')}`")
-    lines.append(f"- **objective** `{data.get('objective', '')}`")
+    status = data.get("status", "unknown")
+    lines.append(f"- {_glyph(status)} **status** `{status}`")
+    lines.append(f"- **objective** `{_fmt_value(data.get('objective', ''))}`")
     lines.append(f"- **authority** `{data.get('authority', 'unknown')}`")
     progress = data.get("progress") if isinstance(data.get("progress"), dict) else {}
-    lines.append(f"- **progress** `{progress.get('complete', 0)}/{progress.get('total', 0)}`")
+    complete = progress.get("complete", 0)
+    total = progress.get("total", 0)
+    if total:
+        lines.append(f"- **progress** `{complete}/{total}` {_bar(complete, total)}")
     provenance = data.get("provenance") if isinstance(data.get("provenance"), dict) else {}
     if provenance:
         lines.extend(["", "## Provenance", ""])
@@ -1724,7 +1728,8 @@ def goal_board_markdown(payload: dict[str, Any]) -> str:
     foreground = next((item for item in tasks if isinstance(item, dict) and item.get("id") == foreground_id), None)
     lines.extend(["", "## Foreground action", ""])
     if foreground:
-        lines.append(f"- `{foreground.get('id')}` {foreground.get('title', '')} — `{foreground.get('status', 'unknown')}`")
+        fg_status = foreground.get("status", "unknown")
+        lines.append(f"- {_glyph(fg_status)} `{foreground.get('id')}` {foreground.get('title', '')} — `{fg_status}`")
     else:
         lines.append("- None — the campaign is terminal or has no tasks.")
     recommendation = data.get("recommendation") if isinstance(data.get("recommendation"), dict) else {}
@@ -1740,7 +1745,7 @@ def goal_board_markdown(payload: dict[str, Any]) -> str:
     if phases:
         lines.extend(["", "## Suggested plan", ""])
         lines.extend(
-            f"- `{phase.get('title', phase.get('id', 'phase'))}` — `{phase.get('status', 'unknown')}`"
+            f"- {_glyph(phase.get('status'))} `{phase.get('title', phase.get('id', 'phase'))}` — `{phase.get('status', 'unknown')}`"
             for phase in phases
             if isinstance(phase, dict) and phase.get("status") != "not_applicable"
         )
@@ -1763,8 +1768,11 @@ def goal_board_markdown(payload: dict[str, Any]) -> str:
     campaign = payload.get("campaign") if isinstance(payload.get("campaign"), dict) else {}
     if campaign:
         lines.extend(["", "## Campaign spine", ""])
-        lines.append(f"- `{campaign.get('campaign_id', '')}` {campaign.get('objective', '')} — `{campaign.get('status', 'unknown')}`")
-        lines.append(f"- Child fleet: `{campaign.get('visible_child_count', 0)}/{campaign.get('child_count', 0)}` visible; archived `{campaign.get('archived_child_count', 0)}`")
+        campaign_status = campaign.get("status", "unknown")
+        lines.append(f"- {_glyph(campaign_status)} `{campaign.get('campaign_id', '')}` {_fmt_value(campaign.get('objective', ''))} — `{campaign_status}`")
+        visible = campaign.get("visible_child_count", 0)
+        child_total = campaign.get("child_count", 0)
+        lines.append(f"- Child fleet: `{visible}/{child_total}` visible {_bar(visible, child_total, width=8)}; archived `{campaign.get('archived_child_count', 0)}`")
         if campaign.get("foreground_child_id"):
             lines.append(f"- Foreground child: `{campaign['foreground_child_id']}`")
     if payload.get("campaign_error"):
@@ -1920,10 +1928,94 @@ def runtime_markdown(payload: dict[str, Any], title: str) -> str:
         markdown = data.get("markdown")
         if isinstance(markdown, str) and markdown.strip():
             return markdown[:8000]
+        # Compact runtime-state rendering instead of a raw dict repr.
+        status = data.get("status")
+        revision = data.get("revision")
+        if status is not None:
+            lines = [f"# {title}", ""]
+            lines.append(f"- {_glyph(status)} **status** `{status}`")
+            if revision is not None:
+                lines.append(f"- **revision** `{revision}`")
+            for key, value in data.items():
+                if key in {"status", "revision", "markdown"}:
+                    continue
+                lines.append(f"- **{key}** `{_fmt_value(value)}`")
+            return "\n".join(lines)[:8000]
     return render(payload, title)[:8000]
 
 
 LIFECYCLE_WINDOW = 2000  # max hook events scanned for the status lifecycle section
+
+
+# --- In-chat visualization vocabulary -------------------------------------
+# Unicode progress bars and status glyphs render monospaced-safe in chat
+# clients, so tool markdown can show proportion at a glance without images.
+
+def _bar(value: Any, total: Any, *, width: int = 10, fill: str = "█", empty: str = "░") -> str:
+    """Unicode progress bar, e.g. `_bar(7, 10)` -> '███████░░░'."""
+    try:
+        value_num = max(0.0, float(value))
+        total_num = max(0.0, float(total))
+    except (TypeError, ValueError):
+        return empty * width
+    ratio = 0.0 if total_num <= 0 else min(1.0, value_num / total_num)
+    filled = round(ratio * width)
+    return fill * filled + empty * (width - filled)
+
+
+def _bar_of_max(value: Any, values: list[Any], *, width: int = 10) -> str:
+    """Bar scaled against the max of ``values`` (for ranked lists).
+
+    Nonzero values always get at least one fill block so small entries
+    remain visible next to the peak.
+    """
+    try:
+        candidates = [abs(float(v)) for v in values]
+        value_num = abs(float(value))
+    except (TypeError, ValueError):
+        candidates, value_num = [], 0.0
+    peak = max(candidates) if candidates else 0.0
+    if peak <= 0:
+        return "░" * width
+    ratio = min(1.0, value_num / peak)
+    filled = round(ratio * width)
+    if value_num > 0 and filled == 0:
+        filled = 1
+    return "█" * filled + "░" * (width - filled)
+
+
+def _glyph(status: Any) -> str:
+    """One-character status glyph: good=●, active=◐, pending=○, bad=✗, done=✓."""
+    value = str(status or "").strip().lower()
+    if value in {"succeeded", "done", "passed", "ok", "healthy", "fresh", "verified", "archived"}:
+        return "✓"
+    if value in {"failed", "error", "stale", "blocked", "denied"}:
+        return "✗"
+    if value in {"running", "active", "in_progress", "executing", "improved"}:
+        return "◐"
+    if value in {"pending", "planned", "queued", "ready", "not_started"}:
+        return "○"
+    if value in {"unknown", "unavailable", "missing"}:
+        return "·"
+    return "◇"
+
+
+def _fmt_value(value: Any, *, limit: int = 90) -> str:
+    """Compact scalar rendering; collections become counts, never reprs."""
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str):
+        text = value.replace("\n", " ").strip()
+        return text[:limit] + ("…" if len(text) > limit else "")
+    if isinstance(value, dict):
+        return f"dict({len(value)} keys)"
+    if isinstance(value, (list, tuple)):
+        return f"list({len(value)} items)"
+    if value is None:
+        return "null"
+    return str(value)[:limit]
 
 
 def lifecycle_summary(root: Path | None = None, window: int = LIFECYCLE_WINDOW) -> dict[str, Any]:
@@ -1988,17 +2080,23 @@ def lifecycle_markdown(payload: dict[str, Any], title: str = "SIPS Lifecycle Len
         lines.append("- **status** `unavailable` — no hook stream found at the SIPS home.")
         return "\n".join(lines).rstrip() + "\n"
     lines.append(f"- **window events** `{payload.get('window_events', 0)}`")
-    for row in payload.get("tools") or []:
+    tool_rows = payload.get("tools") or []
+    tool_totals = [row.get("total", 0) for row in tool_rows]
+    for row in tool_rows:
         issues = row.get("issues") or 0
+        bar = _bar_of_max(row.get("total", 0), tool_totals)
         suffix = f" ({issues} issues)" if issues else ""
-        lines.append(f"- **{row.get('tool')}** `{row.get('total', 0)} calls{suffix}`")
+        lines.append(f"- {bar} **{row.get('tool')}** `{row.get('total', 0)} calls{suffix}`")
     for row in payload.get("sessions") or []:
-        lines.append(f"- **session** `{row.get('session_id')}` events=`{row.get('events', 0)}`")
+        lines.append(f"- {_glyph('active')} **session** `{row.get('session_id')}` events=`{row.get('events', 0)}`")
     histogram = payload.get("histogram") or []
     if histogram:
         first, last = histogram[0], histogram[-1]
         peak = max(histogram, key=lambda col: col.get("events", 0))
         lines.append(f"- **activity window (UTC)** `{first.get('hour')}` -> `{last.get('hour')}` peak=`{peak.get('hour')} ({peak.get('events')} events)`")
+        hist_bars = [col.get("events", 0) for col in histogram]
+        spark = "".join("▁▂▃▄▅▆▇█"[min(7, int((count / max(hist_bars)) * 7.99))] if max(hist_bars) else "▁" for count in hist_bars)
+        lines.append(f"- **activity** `{spark}`")
     lines.append("")
     lines.append(f"- {payload.get('claim_boundary', '')}")
     return "\n".join(lines).rstrip() + "\n"
@@ -2054,11 +2152,13 @@ def board_snapshot_markdown(payload: dict[str, Any]) -> str:
     board = payload.get("board") or {}
     progress = board.get("progress") if isinstance(board.get("progress"), dict) else {}
     if board.get("status"):
-        lines.append(f"- **board status** `{board.get('status')}`")
+        lines.append(f"- {_glyph(board.get('status'))} **board status** `{board.get('status')}`")
     if board.get("objective"):
-        lines.append(f"- **objective** `{board.get('objective')}`")
+        lines.append(f"- **objective** `{_fmt_value(board.get('objective'))}`")
     if progress:
-        lines.append(f"- **progress** `{progress.get('complete', 0)}/{progress.get('total', 0)}`")
+        complete = progress.get("complete", 0)
+        total = progress.get("total", 0)
+        lines.append(f"- **progress** `{complete}/{total}` {_bar(complete, total)}")
     if board.get("revision") is not None:
         lines.append(f"- **revision** `{board.get('revision')}`")
     goal = payload.get("goal") or {}
@@ -2068,10 +2168,13 @@ def board_snapshot_markdown(payload: dict[str, Any]) -> str:
     lifecycle = payload.get("lifecycle") or {}
     if lifecycle.get("available"):
         lines.append(f"- **lifecycle window events** `{lifecycle.get('window_events', 0)}`")
-        for row in lifecycle.get("top_tools") or []:
+        tool_rows = lifecycle.get("top_tools") or []
+        tool_totals = [row.get("total", 0) for row in tool_rows]
+        for row in tool_rows:
             issues = row.get("issues") or 0
+            bar = _bar_of_max(row.get("total", 0), tool_totals)
             suffix = f" ({issues} issues)" if issues else ""
-            lines.append(f"- **top tool** `{row.get('tool')} x{row.get('total', 0)}{suffix}`")
+            lines.append(f"- {bar} **top tool** `{row.get('tool')} x{row.get('total', 0)}{suffix}`")
     else:
         lines.append("- **lifecycle** `unavailable`")
     lines.append("")
@@ -2082,9 +2185,9 @@ def board_snapshot_markdown(payload: dict[str, Any]) -> str:
 def render(payload: dict[str, Any], title: str) -> str:
     lines = [f"# {title}", ""]
     for key, value in payload.items():
-        if key in {"receipt", "receipts", "state", "files", "risks", "records", "surfaces", "git", "routes", "findings", "sources", "checks", "verification_commands", "repro_steps", "runtime_hooks", "task_exposure", "proof_layers"}:
+        if key in {"receipt", "receipts", "state", "files", "risks", "records", "surfaces", "git", "routes", "findings", "sources", "checks", "verification_commands", "repro_steps", "runtime_hooks", "task_exposure", "proof_layers", "lifecycle"}:
             continue
-        lines.append(f"- **{key}** `{value}`")
+        lines.append(f"- **{key}** `{_fmt_value(value)}`")
     if "runtime_hooks" in payload:
         runtime = payload["runtime_hooks"] if isinstance(payload["runtime_hooks"], dict) else {}
         hooks = [item for item in (runtime.get("hooks") or []) if isinstance(item, dict)]
@@ -2107,12 +2210,15 @@ def render(payload: dict[str, Any], title: str) -> str:
             lines.append("")
             lines.append("## Lifecycle Lens")
             lines.append(f"- **window events** `{lifecycle.get('window_events', 0)}`")
-            for row in lifecycle.get("tools") or []:
+            tool_rows = lifecycle.get("tools") or []
+            tool_totals = [row.get("total", 0) for row in tool_rows]
+            for row in tool_rows:
                 issues = row.get("issues") or 0
+                bar = _bar_of_max(row.get("total", 0), tool_totals)
                 suffix = f" ({issues} issues)" if issues else ""
-                lines.append(f"- **{row.get('tool')}** `{row.get('total', 0)} calls{suffix}`")
+                lines.append(f"- {bar} **{row.get('tool')}** `{row.get('total', 0)} calls{suffix}`")
             for row in lifecycle.get("sessions") or []:
-                lines.append(f"- **session** `{row.get('session_id')}` events=`{row.get('events', 0)}`")
+                lines.append(f"- {_glyph('active')} **session** `{row.get('session_id')}` events=`{row.get('events', 0)}`")
     if "receipt" in payload:
         receipt = payload["receipt"] if isinstance(payload["receipt"], dict) else {}
         lines.append("")
