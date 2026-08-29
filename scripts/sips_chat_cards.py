@@ -557,6 +557,54 @@ def gate_matrix_card(payload: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def run_quality_card(payload: dict[str, Any]) -> str:
+    """Per-run quality lens: gate cells, evidence counts, tags, budget."""
+    run_id = str(payload.get("run_id", ""))[:24]
+    lines = _header("🔬", "Run Quality", f"`{run_id}…` graph receipt lens")
+    if not payload.get("available"):
+        lines.append(f"*{payload.get('reason') or 'Receipt unavailable.'}*")
+        lines.extend(_footer(payload.get("claim_boundary", "")))
+        return "\n".join(lines).rstrip() + "\n"
+
+    status = payload.get("status", "unknown")
+    lines.append(f"**Status** {glyph(status)} `{status}` · impact `{payload.get('impact', '—')}`")
+
+    gates = payload.get("gates") or []
+    if gates:
+        lines.append("")
+        lines.append("**Gates** (evidence items counted)")
+        for gate in gates:
+            icon = {"ok": "🟢", "failed": "🔴", "partial": "🟡", "skipped": "⚪"}.get(gate.get("status"), "❔")
+            reasons = gate.get("reasons") or []
+            suffix = f" · 🔴 {fmt(reasons[0], 60)}" if reasons else ""
+            lines.append(f"- {icon} `{gate['name']}` evidence `{gate.get('evidence_total', 0)}`{suffix}")
+
+    tags = (payload.get("risk_tags") or [])
+    reviewers = (payload.get("reviewer_tags") or [])
+    if tags or reviewers:
+        lines.append("")
+        parts = []
+        if tags:
+            parts.append("risk: " + ", ".join(f"`{t}`" for t in tags))
+        if reviewers:
+            parts.append("reviewer: " + ", ".join(f"`{t}`" for t in reviewers))
+        lines.append("**Tags** — " + " · ".join(parts))
+
+    failed = payload.get("failed_gates") or []
+    if failed:
+        lines.append(f"- 🔴 failed gates: {', '.join(f'`{g}`' for g in failed)}")
+
+    budget = payload.get("budget_usage")
+    if budget:
+        charged = budget.get("charged_tokens") or 0
+        limit = budget.get("released_token_limit") or 0
+        lines.append("")
+        lines.append(f"**Budget** {bar(charged, limit or 1)} `{charged}` / `{limit}` charged")
+
+    lines.extend(_footer(payload.get("claim_boundary", "")))
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def selfloop_card(payload: dict[str, Any]) -> str:
     lines = _header("🔁", "SIPS Selfloop", "persistent improvement loop")
     raw_state = payload.get("state")

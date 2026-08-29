@@ -233,6 +233,22 @@ def _command_gates(_homebase: Any, _raw: str) -> str:
         return "Gate matrix unavailable right now."
 
 
+def _command_quality(_homebase: Any, raw: str) -> str:
+    """Per-run quality lens via run_quality (direct import)."""
+    run_id = str(raw or "").strip().split()[0] if str(raw or "").strip() else ""
+    if not run_id:
+        return "Usage: /sips-quality <run_id> (see /sips-gates for run ids)"
+    try:
+        from .scripts.run_quality import run_quality_payload
+    except ImportError:
+        from run_quality import run_quality_payload  # type: ignore[no-redef]
+    try:
+        return _cards.run_quality_card(run_quality_payload(run_id))
+    except Exception:
+        logger.debug("SIPS run quality card render failed", exc_info=True)
+        return "Run quality lens unavailable right now."
+
+
 def _command_audit(homebase: Any, _raw: str) -> str:
     return _card_result(homebase, "homebase_host_audit", {"root": str(_PLUGIN_ROOT)}, _cards.audit_card)
 
@@ -292,6 +308,7 @@ def _register_commands(ctx: Any, homebase: Any) -> None:
         "sips-record": (partial(_command_record, homebase), "Record a bounded SIPS learning", "<title> :: <body>"),
         "sips-usage": (partial(_command_usage, homebase), "Show LLM token usage lens (days 1-30, default 7)", "[days]"),
         "sips-gates": (partial(_command_gates, homebase), "Show gate-evidence matrix for recent runs", ""),
+        "sips-quality": (partial(_command_quality, homebase), "Show one run's quality lens (gates, evidence, tags)", "<run_id>"),
         "sips-lifecycle": (partial(_command_lifecycle, homebase), "Show the agent hook-stream lifecycle lens", ""),
         "sips-freshness": (partial(_command_freshness, homebase), "Check MCP source/cache/task freshness", ""),
         "sips-audit": (partial(_command_audit, homebase), "Audit live hook wiring and trust", ""),

@@ -605,6 +605,14 @@ def get_gate_matrix() -> dict[str, Any]:
     return gate_matrix_payload()
 
 
+@router.get("/runs/{run_id}/quality")
+def get_run_quality(run_id: str) -> dict[str, Any]:
+    """Bounded per-run quality lens from the run's graph receipt (read-only)."""
+    from run_quality import run_quality_payload
+
+    return run_quality_payload(run_id)
+
+
 @router.get("/goal-board")
 def get_goal_board() -> dict[str, Any]:
     """Unified Goal Board view: runtime projection joined with legacy goal state.

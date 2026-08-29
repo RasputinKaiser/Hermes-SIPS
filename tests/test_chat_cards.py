@@ -325,3 +325,36 @@ def test_gate_matrix_card_unavailable_and_empty() -> None:
     assert "runtime down" in card
     empty = cards.gate_matrix_card({"available": True, "gates": cards.GATE_ORDER if hasattr(cards, 'GATE_ORDER') else [], "runs": [], "claim_boundary": ""})
     assert "No runtime runs yet" in empty
+
+
+def test_run_quality_card_renders_gates_evidence_budget() -> None:
+    payload = {
+        "available": True,
+        "run_id": "h-20260829_020805_9c6566",
+        "status": "succeeded",
+        "impact": "normal",
+        "gates": [
+            {"name": "integrity", "status": "ok", "reasons": [], "evidence_total": 634, "evidence": []},
+            {"name": "correctness", "status": "failed", "reasons": ["digest mismatch at rev 4"], "evidence_total": 0, "evidence": []},
+        ],
+        "impact": "normal",
+        "risk_tags": ["memory"],
+        "reviewer_tags": ["security"],
+        "failed_gates": ["correctness"],
+        "budget_usage": {"charged_tokens": 4000000, "released_token_limit": 4000000},
+        "claim_boundary": "lens only",
+    }
+    card = cards.run_quality_card(payload)
+    assert "🔬 Run Quality" in card
+    assert "`succeeded` · impact `normal`" in card
+    assert "🟢 `integrity` evidence `634`" in card
+    assert "🔴 `correctness`" in card and "digest mismatch" in card
+    assert "risk: `memory`" in card and "reviewer: `security`" in card
+    assert "failed gates: `correctness`" in card
+    assert "**Budget** ████████████ `4000000` / `4000000` charged" in card
+    assert "🛡️ lens only" in card
+
+
+def test_run_quality_card_unavailable() -> None:
+    card = cards.run_quality_card({"available": False, "run_id": "run-x", "reason": "no graph receipt for this run", "claim_boundary": "cb"})
+    assert "no graph receipt" in card
