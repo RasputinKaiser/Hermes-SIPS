@@ -1186,6 +1186,79 @@ function SelfloopControls({ api, onMutated }) {
   })
 }
 
+// Unified Goal Board: runtime projection joined with legacy goal state.
+// One board: authority, phase strip, ready tasks, and the recommendation.
+function GoalBoardCard({ api }) {
+  const query = useQuery({ queryKey: ['sips-control-plane', 'goal-board'], queryFn: () => api.rest('/goal-board'), refetchInterval: pollInterval(20000) })
+
+  if (query.isLoading) {
+    return jsx(Card, { title: 'Goal board', icon: 'target', lead: true, children: jsx('div', { style: styles.unavailable, children: 'Reading the board…' }) })
+  }
+  if (query.isError) {
+    return jsx(Card, { title: 'Goal board', icon: 'target', lead: true, children: jsx('div', { style: styles.unavailable, children: 'The goal-board endpoint is unavailable right now.' }) })
+  }
+  const board = query.data
+  const goal = board?.goal || {}
+  const runtime = board?.runtime
+  const phases = board?.phases || []
+  const tasks = board?.runtime_tasks || []
+  const recommendation = board?.recommendation
+  const progress = runtime?.progress || { complete: 0, total: 0 }
+  const total = progress.total || goal.subtasks?.total || 0
+  const complete = progress.complete || goal.subtasks?.done || 0
+  const boardStatus = runtime?.status || goal.status || 'none'
+  const glyph = boardStatus === 'running' || boardStatus === 'active' ? '◐' : boardStatus === 'succeeded' || boardStatus === 'done' ? '✓' : boardStatus === 'failed' ? '✗' : '○'
+
+  return jsx(Card, {
+    title: 'Goal board',
+    icon: 'target',
+    lead: true,
+    hint: `authority: ${board?.authority || 'none'}${runtime?.run_id ? ` · run ${runtime.run_id}` : ''}${runtime ? ` · rev ${runtime.revision}` : ''}`,
+    children: [
+      jsxs('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }, children: [
+        jsx('span', { 'aria-hidden': true, style: { fontSize: '15px', color: boardStatus === 'failed' ? COLORS.bad : boardStatus === 'running' || boardStatus === 'active' ? COLORS.accent : COLORS.muted }, children: glyph }),
+        jsx('span', { style: { ...styles.objective, flex: 1, minWidth: 0 }, children: goal.objective || runtime?.run_id || 'No active goal — the board fills when /goal or /selfloop starts one.' })
+      ] }, 'head'),
+      total ? jsxs('div', { key: 'progress', children: [
+        jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }, children: [
+          jsx('span', { style: styles.label, children: 'Progress' }),
+          jsx('span', { style: { ...styles.value, fontVariantNumeric: 'tabular-nums' }, children: `${complete}/${total}` })
+        ] }),
+        jsx('div', { style: styles.progressTrack, children: jsx('div', { style: { ...styles.progressFill, width: `${total ? Math.round((complete / total) * 100) : 0}%`, background: COLORS.accent } }) })
+      ] }) : null,
+      phases.length ? jsx('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '6px', margin: '11px 0 2px' }, key: 'phases', children: phases.map((phase) => jsxs('span', {
+        style: {
+          display: 'inline-flex', alignItems: 'center', gap: '5px',
+          padding: '3px 9px', borderRadius: '999px', fontSize: '11px', fontWeight: 650,
+          border: `1px solid ${phase.status === 'active' ? COLORS.accent : COLORS.border}`,
+          color: phase.status === 'active' ? COLORS.accent : COLORS.muted
+        },
+        children: [phase.status === 'active' ? '◐' : phase.status === 'done' ? '✓' : '○', ' ', phase.title]
+      }, phase.title)) }) : null,
+      tasks.length ? jsx('div', { style: { marginTop: '8px' }, key: 'tasks', children: tasks.slice(0, 5).map((task) => jsxs('div', { style: styles.row, children: [
+        jsxs('span', { style: { fontSize: '12px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: [
+          jsx('span', { 'aria-hidden': true, style: { marginRight: '6px', color: task.status === 'succeeded' ? COLORS.good : task.status === 'failed' ? COLORS.bad : task.ready ? COLORS.accent : COLORS.muted }, children: task.status === 'succeeded' ? '✓' : task.status === 'failed' ? '✗' : task.ready ? '◉' : '○' }),
+          task.title || task.id
+        ] }),
+        jsxs('span', { style: { ...styles.value, flexShrink: 0 }, children: [
+          task.ready && task.status !== 'succeeded' ? jsx('span', { style: { color: COLORS.accent, marginRight: '6px', fontSize: '10px', fontWeight: 700 }, children: 'READY' }) : null,
+          jsx(StateBadge, { value: task.status })
+        ] })
+      ] }, task.id)) }) : null,
+      recommendation ? jsx('div', {
+        style: { marginTop: '11px', border: `1px solid ${COLORS.accent}`, borderRadius: '10px', padding: '10px 12px', background: 'rgba(125,211,252,0.06)' },
+        key: 'rec',
+        children: [
+          jsxs('div', { style: { fontSize: '12px', fontWeight: 700 }, children: ['Next: ', recommendation.title || recommendation.phase] }),
+          recommendation.why ? jsx('div', { style: { ...styles.label, marginTop: '4px', lineHeight: 1.5 }, children: recommendation.why }) : null,
+          recommendation.proof_required ? jsx('div', { style: { ...styles.label, marginTop: '3px', lineHeight: 1.5, color: COLORS.warn }, children: `Proof: ${recommendation.proof_required}` }) : null
+        ]
+      }) : null,
+      jsx('div', { style: { ...styles.label, fontSize: '11px', marginTop: '11px', lineHeight: 1.5 }, key: 'boundary', children: board?.claim_boundary })
+    ]
+  })
+}
+
 function GoalCard({ goal, api, selfloop, onSelfloopMutated }) {
   const controls = jsx(SelfloopControls, { api, onMutated: onSelfloopMutated })
   const selfloopMutation = useSipsMutation(api, {
@@ -2890,8 +2963,9 @@ function Dashboard({ api }) {
       // Lead/support structure per workspace: the reason-for-visit leads;
       // supporting cards subordinate below. Squint test: one lead per tab.
       activeTab === 'overview' ? jsxs('div', { children: [
-        jsx('div', { style: styles.leadRow, children: jsx(GoalCard, { goal: data.goal, api, selfloop: selfloopQuery.data, onSelfloopMutated: () => selfloopQuery.refetch() }) }),
+        jsx('div', { style: styles.leadRow, children: jsx(GoalBoardCard, { api }) }),
         jsx('div', { style: styles.supportGrid, children: [
+          jsx(GoalCard, { goal: data.goal, api, selfloop: selfloopQuery.data, onSelfloopMutated: () => selfloopQuery.refetch() }),
           jsx(RuntimeCard, { api }),
           jsx(RunsCard, { api }),
           jsx(FleetCard, { api }),

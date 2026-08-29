@@ -579,6 +579,84 @@ def get_lifecycle() -> dict[str, Any]:
     }
 
 
+@router.get("/goal-board")
+def get_goal_board() -> dict[str, Any]:
+    """Unified Goal Board view: runtime projection joined with legacy goal state.
+
+    Shows whichever authority has board data (runtime wins when present),
+    with phase classification, the recommendation (why + proof required),
+    and subtask progress so the operator sees one board, not two systems.
+    """
+    summary = _goal_summary()
+    board: dict[str, Any] = {
+        "schema": "sips.goal-board.v1",
+        "generated_at": _now(),
+        "goal": summary,
+        "claim_boundary": "Presentation guidance only: phases and recommendations are derived views, never runtime control authority.",
+    }
+
+    runtime_tasks: list[dict[str, Any]] = []
+    runtime: dict[str, Any] | None = None
+    try:
+        from harness_homebase_mcp import goal_board_payload
+
+        payload = goal_board_payload(PLUGIN_ROOT, "", None, 12)
+        raw_data = payload.get("data")
+        data = raw_data if isinstance(raw_data, dict) else {}
+        if payload.get("ok") and data:
+            raw_progress = data.get("progress") if isinstance(data.get("progress"), dict) else {}
+            runtime = {
+                "authority": str(data.get("authority") or "unknown")[:40],
+                "run_id": str(data.get("run_id") or "")[:80] or None,
+                "status": str(data.get("status") or "unknown")[:40],
+                "revision": int(data.get("revision") or 0),
+                "progress": {
+                    "complete": int(raw_progress.get("complete") or 0),
+                    "total": int(raw_progress.get("total") or 0),
+                },
+            }
+            for task in (data.get("tasks") or [])[:8]:
+                if not isinstance(task, dict):
+                    continue
+                runtime_tasks.append(
+                    {
+                        "id": str(task.get("id") or "")[:60],
+                        "title": str(task.get("title") or "")[:220],
+                        "status": str(task.get("status") or "unknown")[:40],
+                        "phase": str(task.get("phase") or "")[:40],
+                        "ready": str(task.get("id") or "") in (data.get("ready_task_ids") or []),
+                        "attempts": int(task.get("attempts") or 0),
+                    }
+                )
+            recommendation = data.get("recommendation") if isinstance(data.get("recommendation"), dict) else {}
+            if recommendation:
+                board["recommendation"] = {
+                    "phase": str(recommendation.get("phase") or "")[:40],
+                    "title": str(recommendation.get("title") or "")[:220],
+                    "why": str(recommendation.get("why") or "")[:320],
+                    "proof_required": str(recommendation.get("proof_required") or "")[:320],
+                }
+            plan = data.get("plan") if isinstance(data.get("plan"), dict) else {}
+            phases_out = []
+            for phase in (plan.get("phases") or [])[:8]:
+                if not isinstance(phase, dict) or phase.get("status") == "not_applicable":
+                    continue
+                phases_out.append(
+                    {
+                        "title": str(phase.get("title") or phase.get("id") or "phase")[:60],
+                        "status": str(phase.get("status") or "unknown")[:40],
+                    }
+                )
+            board["phases"] = phases_out
+    except Exception as exc:  # pragma: no cover - defensive API boundary
+        board["runtime_error"] = f"{type(exc).__name__}"
+
+    board["runtime"] = runtime
+    board["runtime_tasks"] = runtime_tasks
+    board["authority"] = "runtime" if runtime else ("legacy-goal" if summary.get("available") else "none")
+    return board
+
+
 @router.get("/health")
 def get_health() -> dict[str, Any]:
     payload = _dashboard_payload()
