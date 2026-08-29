@@ -378,6 +378,30 @@ def build_board(
         "next_revision": int(state.get("revision", 0)),
         "claim_boundary": "This is a read-only UI projection. Runtime events, leases, and immutable receipts remain authoritative.",
     }
+    # Budget lens: the reducer already computes budget_usage on every read;
+    # surface a bounded summary so the board shows spend against the released
+    # tranche without exposing raw event payloads. Absent for legacy runs
+    # whose state predates the ledger.
+    raw_budget = state.get("budget_usage")
+    if isinstance(raw_budget, Mapping):
+        board["budget"] = {
+            "charged_tokens": int(raw_budget.get("charged_tokens") or 0),
+            "remaining_hard": int(raw_budget.get("remaining_hard") or 0),
+            "soft_exceeded": bool(raw_budget.get("soft_exceeded")),
+            "released_token_limit": int(raw_budget.get("released_token_limit") or 0),
+            "released_tranches": int(raw_budget.get("released_tranches") or 0),
+            "tranche_limits": [int(v) for v in (raw_budget.get("tranche_limits") or [])][:4],
+            "resources": {
+                str(k)[:30]: int(v or 0)
+                for k, v in (raw_budget.get("resources") or {}).items()
+                if isinstance(v, (int, float))
+            },
+            "resource_limits": {
+                str(k)[:30]: int(v or 0)
+                for k, v in (raw_budget.get("resource_limits") or {}).items()
+                if isinstance(v, (int, float))
+            },
+        }
     provenance = _as_mapping(state.get("provenance"))
     if provenance:
         board["provenance"] = dict(provenance)

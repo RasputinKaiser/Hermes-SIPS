@@ -161,3 +161,25 @@ def test_brainstorm_idea_cards_are_suggestions_with_plan_proof():
     assert cards[0]["recommended_next"] == "scout_then_plan"
     assert cards[0]["plan"]["steps"][-1].startswith("Worker implements")
     assert cards[0]["plan"]["proof"]
+
+
+def test_board_includes_bounded_budget_lens(tmp_path):
+    """The board surfaces a bounded budget summary when the state carries one."""
+    controller = _controller(tmp_path)
+    result = RuntimeAPI(controller=controller).read("board", {"run_id": "board-test"})
+    board = result["data"]
+    # A fresh run has a budget view (the reducer computes it on every read),
+    # but zero charge: the gauge renders at 0%.
+    budget = board.get("budget")
+    assert isinstance(budget, dict)
+    assert set(budget) >= {"charged_tokens", "remaining_hard", "soft_exceeded", "released_token_limit", "tranche_limits", "resources", "resource_limits"}
+    assert budget["charged_tokens"] == 0
+    assert budget["soft_exceeded"] is False
+    assert isinstance(budget["resources"], dict)
+    assert isinstance(budget["resource_limits"], dict)
+
+
+def test_board_budget_lens_absent_for_legacy_state():
+    """States without budget_usage (legacy runs) omit the key entirely."""
+    board = build_board({"run_id": "legacy", "status": "running", "tasks": {}, "revision": 3}, run_id="legacy")
+    assert "budget" not in board

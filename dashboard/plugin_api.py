@@ -897,6 +897,7 @@ def get_runtime() -> dict[str, Any]:
             "ratio": float(progress.get("ratio") or 0.0),
         },
         "counts": {str(k)[:30]: int(v) for k, v in (data.get("counts") or {}).items() if isinstance(v, int)},
+        "budget": data.get("budget") if isinstance(data.get("budget"), dict) else None,
         "tasks": tasks_out,
         "source_path": str(provenance.get("source_path") or "")[:300],
         "last_updated_at": provenance.get("last_updated_at"),

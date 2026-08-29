@@ -1596,6 +1596,26 @@ function RuntimeCard({ api }) {
   const ratio = Math.round((Number(progress.ratio) || 0) * 100)
   const boardTone = runtime.status === 'succeeded' ? 'good' : runtime.status === 'failed' ? 'bad' : 'accent'
   const tasks = runtime.tasks || []
+  const budget = runtime.budget || null
+  const charged = Number(budget?.charged_tokens) || 0
+  const released = Number(budget?.released_token_limit) || 0
+  const trancheLimits = budget?.tranche_limits || []
+  const currentTranche = trancheLimits.length ? trancheLimits[Math.min(Number(budget?.released_tranches) || 1, trancheLimits.length) - 1] : released
+  const spendRatio = currentTranche ? Math.min(100, Math.round(charged / currentTranche * 100)) : 0
+  const spendTone = budget?.soft_exceeded ? 'warn' : spendRatio >= 90 ? 'warn' : spendRatio >= 100 ? 'bad' : 'good'
+  const overTranche = currentTranche && charged > currentTranche
+  const resourceRows = budget ? Object.entries(budget.resource_limits || {})
+    .filter(([key]) => !['model_tokens', 'output_tokens', 'retrieval_tokens'].includes(key))
+    .map(([key, limit]) => ({ key, limit, used: (budget.resources || {})[key] || 0 }))
+    .filter((row) => row.limit > 0 && row.used > 0) : []
+
+  const fmtCompact = (n) => {
+    const v = Number(n) || 0
+    if (v >= 1e9) return `${(v / 1e9).toFixed(1)}B`
+    if (v >= 1e6) return `${(v / 1e6).toFixed(1)}M`
+    if (v >= 1e3) return `${(v / 1e3).toFixed(0)}K`
+    return String(v)
+  }
 
   return jsx(Card, {
     title: 'Runtime goal board',
@@ -1614,6 +1634,30 @@ function RuntimeCard({ api }) {
         jsx('span', { style: styles.label, children: 'Task progress' }),
         jsx('span', { style: { ...styles.value, fontVariantNumeric: 'tabular-nums' }, children: `${progress.complete}/${progress.total}` })
       ] }),
+      budget ? jsxs('div', { style: { marginTop: '10px', display: 'grid', gap: '5px' }, children: [
+        jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }, children: [
+          jsx('span', { style: { ...styles.label, fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em' }, children: `Budget · tranche ${budget.released_tranches ?? '—'}/${trancheLimits.length || '—'} released` }),
+          jsxs('span', { style: { fontSize: '11px', fontVariantNumeric: 'tabular-nums' }, children: [
+            jsx('span', { style: { fontWeight: 650, color: budget.soft_exceeded ? COLORS.warn : COLORS.text }, children: fmtCompact(charged) }),
+            jsx('span', { style: { color: COLORS.muted }, children: ` / ${fmtCompact(currentTranche)}` })
+          ] })
+        ] }),
+        jsx('div', {
+          style: { height: '6px', borderRadius: '999px', background: 'rgba(255,255,255,0.08)', overflow: 'hidden' },
+          role: 'img',
+          'aria-label': `Budget: ${fmtCompact(charged)} of ${fmtCompact(currentTranche)} tranche tokens charged (${spendRatio}%)`,
+          children: jsx('div', { style: { height: '100%', width: `${spendRatio}%`, borderRadius: '999px', background: COLORS[spendTone], opacity: 0.8 } })
+        }),
+        overTranche && trancheLimits.length > (Number(budget.released_tranches) || 1) ? jsx('div', { style: { ...styles.label, fontSize: '10px', color: COLORS.warn }, children: `Soft budget exceeded — next tranche releases at ${fmtCompact(trancheLimits[Math.min(Number(budget.released_tranches) || 1, trancheLimits.length)])}` }) : null,
+        budget.soft_exceeded ? jsx('div', { style: { ...styles.label, fontSize: '10px', color: COLORS.warn }, children: 'Soft limit exceeded — expansion events gated until a new tranche releases' }) : null,
+        resourceRows.length ? jsx('div', { style: { display: 'grid', gap: '4px', marginTop: '4px' }, children: resourceRows.map((row) => jsx('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '10px' }, children: [
+          jsx('span', { style: { fontSize: '11px', fontFamily: 'ui-monospace, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: formatStatus(row.key) }),
+          jsxs('span', { style: { flexShrink: 0, fontSize: '11px', fontVariantNumeric: 'tabular-nums', color: row.used / row.limit >= 0.9 ? COLORS.warn : COLORS.muted }, children: [
+            fmtCompact(row.used), ' / ', fmtCompact(row.limit),
+            jsx('div', { style: { height: '3px', width: '72px', marginTop: '2px', borderRadius: '999px', background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }, children: jsx('div', { style: { height: '100%', width: `${Math.min(100, row.used / row.limit * 100)}%`, background: row.used / row.limit >= 0.9 ? COLORS.warn : COLORS.accent, opacity: 0.7 } }) })
+          ] })
+        ] }, `res-${row.key}`)) }) : null
+      ] }) : null,
       tasks.slice(0, 4).map((task) => jsxs('div', { style: styles.row, children: [
         jsx('span', { style: styles.label, children: [
           jsx(Codicon, { name: task.status === 'succeeded' ? 'check' : task.status === 'failed' ? 'error' : 'sync', size: '0.85em', style: { verticalAlign: '-0.12em', marginRight: '5px', color: COLORS[task.status === 'succeeded' ? 'good' : task.status === 'failed' ? 'bad' : 'accent'] } }),
