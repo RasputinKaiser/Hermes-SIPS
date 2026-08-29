@@ -574,6 +574,46 @@ def test_run_detail_counts_receipts(sips_home: Path) -> None:
     assert plugin_api.get_run_detail("h-empty").get("receipt_count") == 0
 
 
+def test_runs_row_includes_receipts_and_active_count(sips_home: Path) -> None:
+    """/runs rows carry receipt counts; 'active' counts non-stale running rows."""
+    run_dir = sips_home / "runtime" / "v1" / "runs" / "h-active"
+    (run_dir / "receipts").mkdir(parents=True)
+    (run_dir / "receipts" / "r1.json").write_text("{}", encoding="utf-8")
+    _write_events(
+        "h-active",
+        [
+            {"event_type": "run.created", "payload": {"objective": "active run", "tasks": [{"id": "t1"}]}},
+            {"event_type": "run.submitted", "payload": {}},
+        ],
+        sips_home,
+    )
+    view = plugin_api.get_runs()
+    run = next(r for r in view["runs"] if r["run_id"] == "h-active")
+    assert run["receipts"] == 1
+    assert run["status"] == "running"
+    assert view["active"] == 1
+
+
+def test_fleet_campaign_detail_projects_child_and_campaign_metadata(
+    sips_home: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Child task_id/timestamps and campaign foreground/created_at are projected."""
+    import harness_homebase_mcp as h
+
+    monkeypatch.setattr(plugin_api, "PLUGIN_ROOT", tmp_path)
+    h.call_tool("homebase_campaign_fleet_write", {"home": str(tmp_path), "operation": "create", "request_json": json.dumps({"objective": "meta probe", "campaign_id": "meta-probe-1"})})
+    h.call_tool("homebase_campaign_fleet_write", {"home": str(tmp_path), "operation": "attach", "request_json": json.dumps({"campaign_id": "meta-probe-1", "title": "child one", "role": "Worker", "task_id": "task-z"})})
+
+    view = plugin_api.get_fleet_campaign("meta-probe-1")
+    assert view["available"] is True
+    child = view["children"][0]
+    assert child["task_id"] == "task-z"
+    assert child["created_at"]
+    assert child["updated_at"]
+    # no runtime run linked -> foreground stays None but key exists
+    assert "foreground_child_id" in view
+
+
 def test_runs_projects_task_progress_from_events(sips_home: Path) -> None:
     """Per-run progress derives from run.created specs + task.* events."""
     _write_events(

@@ -703,6 +703,7 @@ def get_runs() -> dict[str, Any]:
     # retry status that returns the task to pending.
     _TASK_STATUS_ALIASES = {"complete": "succeeded", "completed": "succeeded", "done": "succeeded", "cancelled": "canceled"}
     runs_out: list[dict[str, Any]] = []
+    active_runs = 0
     for run_dir in run_dirs[:12]:
         events_path = run_dir / "events.jsonl"
         objective = ""
@@ -772,13 +773,17 @@ def get_runs() -> dict[str, Any]:
                 "last_event": last_event[:40],
                 "events": event_count,
                 "progress": progress,
+                "receipts": _count_receipts(run_dir.name),
                 "updated_at": datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat(),
             }
         )
+        if status == "running":
+            active_runs += 1
     return {
         "schema": "sips.runs.view.v1",
         "available": True,
         "total": len(run_dirs),
+        "active": active_runs,
         "runs": runs_out,
         "generated_at": _now(),
         "claim_boundary": "Run summaries derive from event streams; task results live in the runtime, not here.",
@@ -1068,6 +1073,9 @@ def get_fleet_campaign(campaign_id: str) -> dict[str, Any]:
                 "objective": str(child.get("objective") or "")[:220],
                 "summary": str(child.get("summary") or "")[:300],
                 "incarnation_count": int(child.get("incarnation_count") or 0),
+                "task_id": str(child.get("task_id") or "")[:60] or None,
+                "created_at": str(child.get("created_at") or "")[:40],
+                "updated_at": str(child.get("updated_at") or "")[:40],
             }
         )
     activity_out = [
@@ -1093,6 +1101,8 @@ def get_fleet_campaign(campaign_id: str) -> dict[str, Any]:
         "visible_child_count": int(data.get("visible_child_count") or 0),
         "runtime_run_id": str(data.get("runtime_run_id") or "")[:80],
         "workspace_root": str(data.get("workspace_root") or "")[:300],
+        "foreground_child_id": str(data.get("foreground_child_id") or "")[:80] or None,
+        "created_at": str(data.get("created_at") or "")[:40],
         "tags": [str(t)[:40] for t in (data.get("tags") or [])[:6] if isinstance(t, (str, int))],
         "children": children_out,
         "activity": activity_out,
