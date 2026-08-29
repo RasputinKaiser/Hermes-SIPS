@@ -170,6 +170,53 @@ def test_lifecycle_card_unavailable_state() -> None:
     assert "No hook stream available" in card
 
 
+def test_usage_card_renders_totals_trend_replay_split() -> None:
+    payload = {
+        "available": True,
+        "window_days": 7,
+        "totals": {
+            "sessions": 12,
+            "api_calls": 300,
+            "fresh_input_tokens": 25_000_000,
+            "output_tokens": 500_000,
+            "cache_hit_pct": 96.4,
+            "fresh_to_output_ratio": "50.0:1",
+            "estimated_cost_usd": 0.42,
+        },
+        "daily": [
+            {"day": "2026-08-28", "fresh_input_tokens": 20_000_000, "cache_hit_pct": 96.0},
+            {"day": "2026-08-29", "fresh_input_tokens": 5_000_000, "cache_hit_pct": 97.0},
+        ],
+        "replay": {
+            "tool_results_replayed_tokens_est": 700_000_000,
+            "top_tools": [{"tool": "terminal", "replayed_tokens_est": 255_000_000}],
+            "top_sessions": [{"session_id": "20260823_152844_056135", "replayed_tool_tokens_est": 108_000_000}],
+        },
+        "direct_vs_subagent": {
+            "direct": {"fresh_input_tokens": 10_000_000},
+            "subagent": {"fresh_input_tokens": 15_000_000},
+        },
+        "claim_boundary": "aggregates only",
+    }
+    card = cards.usage_card(payload)
+    assert "📊 Token Usage" in card
+    assert "7-day window" in card and "`12` sessions" in card
+    assert "cache 96.4%" in card and "🟢" in card
+    assert "25.0M" in card and "50.0:1" in card
+    assert "2026-08-29" in card and "97.0%" in card
+    assert "Replay leaders" in card and "`terminal`" in card
+    assert "20260823_152844_056135…" in card
+    assert "60%` of fresh input" in card  # 15M / 25M
+    assert "🛡️ aggregates only" in card
+
+
+def test_usage_card_unavailable_and_empty_days() -> None:
+    card = cards.usage_card({"available": False, "reason": "store missing", "claim_boundary": "cb"})
+    assert "store missing" in card and "🛡️ cb" in card
+    empty = cards.usage_card({"available": True, "window_days": 7, "totals": {}, "daily": [], "replay": {}, "direct_vs_subagent": {}})
+    assert "📊 Token Usage" in empty and "0-day window" not in empty  # defaults to 7
+
+
 def test_freshness_card_task_surface_bar() -> None:
     payload = {
         "status": "fresh",

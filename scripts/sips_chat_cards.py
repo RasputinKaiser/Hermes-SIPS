@@ -261,6 +261,77 @@ def record_card(payload: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def usage_card(payload: dict[str, Any]) -> str:
+    """Token-usage lens: totals, cache-hit trend, replay leaders, subagent split."""
+    lines = _header("📊", "Token Usage", "Hermes session store, read-only aggregate")
+    if not payload.get("available"):
+        lines.append(f"*{payload.get('reason') or 'Session store unavailable.'}*")
+        lines.extend(_footer(payload.get("claim_boundary", "")))
+        return "\n".join(lines).rstrip() + "\n"
+
+    def fmt(n: Any) -> str:
+        try:
+            v = float(n or 0)
+        except (TypeError, ValueError):
+            v = 0.0
+        if v >= 1e9:
+            return f"{v / 1e9:.2f}B"
+        if v >= 1e6:
+            return f"{v / 1e6:.1f}M"
+        if v >= 1e3:
+            return f"{v / 1e3:.1f}K"
+        return f"{int(v)}"
+
+    totals = payload.get("totals") or {}
+    lines.append(
+        f"**{payload.get('window_days', 7)}-day window** — `{totals.get('sessions', 0)}` sessions · "
+        f"`{totals.get('api_calls', 0)}` calls · est `${totals.get('estimated_cost_usd', 0)}`"
+    )
+    hit = totals.get("cache_hit_pct")
+    hit_chip = _chip(f"cache {hit}%", "good" if (hit or 0) >= 90 else "warn") if hit is not None else ""
+    ratio = totals.get("fresh_to_output_ratio")
+    lines.append(
+        f"- Fresh input `{fmt(totals.get('fresh_input_tokens'))}` · Output `{fmt(totals.get('output_tokens'))}`"
+        + (f" · ratio `{ratio}`" if ratio else "")
+    )
+    lines.append(f"- {hit_chip} replayed(tool) ≈ `{fmt((payload.get('replay') or {}).get('tool_results_replayed_tokens_est'))}`")
+
+    daily = (payload.get("daily") or [])[-7:]
+    if daily:
+        lines.append("")
+        lines.append("**Fresh input / day**")
+        peak = max((d.get("fresh_input_tokens") or 0 for d in daily), default=1) or 1
+        for d in daily:
+            day_hit = d.get("cache_hit_pct")
+            tone = "🟢" if (day_hit or 0) >= 90 else "🟡"
+            lines.append(
+                f"- {bar(d.get('fresh_input_tokens'), peak)} `{d.get('day', '?')}` `{fmt(d.get('fresh_input_tokens'))}` {tone} {day_hit if day_hit is not None else '—'}%"
+            )
+
+    replay = payload.get("replay") or {}
+    top_tools = replay.get("top_tools") or []
+    if top_tools:
+        lines.append("")
+        lines.append("**Replay leaders (est)**")
+        peak = max((t.get("replayed_tokens_est") or 0 for t in top_tools), default=1) or 1
+        for t in top_tools[:4]:
+            lines.append(f"- {bar_of_max(t.get('replayed_tokens_est'), [peak])} `{t['tool']}` ≈`{fmt(t.get('replayed_tokens_est'))}`")
+    top_sessions = replay.get("top_sessions") or []
+    if top_sessions:
+        lines.append(f"- heaviest: `{str(top_sessions[0].get('session_id', ''))[:24]}…` ≈`{fmt(top_sessions[0].get('replayed_tool_tokens_est'))}`")
+
+    split = payload.get("direct_vs_subagent") or {}
+    sub = (split.get("subagent") or {}).get("fresh_input_tokens") or 0
+    direct = (split.get("direct") or {}).get("fresh_input_tokens") or 0
+    if sub or direct:
+        share = round(100 * sub / (sub + direct)) if (sub + direct) else 0
+        lines.append("")
+        lines.append(f"**Subagent share** {bar(share, 100)} `{share}%` of fresh input (`{fmt(sub)}` / `{fmt(sub + direct)}`)")
+
+    lines.extend(_footer(payload.get("claim_boundary", "")))
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def lifecycle_card(payload: dict[str, Any]) -> str:
     """Hook-stream lens: tool bars, session rollup, denials, activity sparkline."""
     lines = _header("📡", "SIPS Lifecycle", "agent hook stream, metadata only")

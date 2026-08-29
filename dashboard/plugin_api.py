@@ -26,6 +26,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 from harness_homebase_mcp import status_payload  # noqa: E402
 from sips_paths import goal_state_path, harness_home, hook_events_path  # noqa: E402
+from usage_lens import usage_payload  # noqa: E402
 
 try:
     from memory_fabric_jsonl import load_records, store_path  # noqa: E402
@@ -576,6 +577,15 @@ def get_lifecycle() -> dict[str, Any]:
         "generated_at": _now(),
         **_lifecycle_summary(),
         "schema_note": "total_events estimates the whole stream; window_events bounds the aggregation window.",
+    }
+
+
+@router.get("/token-usage")
+def get_token_usage(days: int = 7) -> dict[str, Any]:
+    """Bounded token-usage lens over the Hermes session store (read-only)."""
+    return {
+        "schema": "sips.token-usage.v1",
+        **usage_payload(days=days),
     }
 
 

@@ -2632,6 +2632,89 @@ function HookFlowCard({ events }) {
   })
 }
 
+// Token-usage lens: aggregate token analytics from the Hermes session store
+// via /token-usage. Totals row, daily cache-hit trend, and the replay leaders
+// (tool results whose size x later-calls dominates context burn).
+function formatTokens(value) {
+  const n = Number(value) || 0
+  if (n >= 1e9) return `${(n / 1e9).toFixed(2)}B`
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`
+  return String(n)
+}
+
+function TokenUsageCard({ api }) {
+  const query = useQuery({ queryKey: ['sips-control-plane', 'token-usage'], queryFn: () => api.rest('/token-usage'), refetchInterval: pollInterval(60000) })
+  const title = 'Token usage'
+  const icon = 'pulse'
+
+  if (query.isLoading) {
+    return jsx(Card, { title, icon, children: jsx('div', { style: styles.unavailable, children: 'Reading session store…' }) })
+  }
+  if (query.isError || !query.data?.available) {
+    return jsx(Card, {
+      title,
+      icon,
+      hint: 'Read-only aggregate over ~/.hermes/state.db.',
+      children: jsx('div', { style: styles.unavailable, children: query.data?.reason || 'The session store is unavailable right now.' })
+    })
+  }
+
+  const data = query.data
+  const totals = data.totals || {}
+  const replay = data.replay || {}
+  const split = data.direct_vs_subagent || {}
+  const daily = (data.daily || []).slice(-7)
+  const maxFresh = Math.max(...daily.map((row) => Number(row.fresh_input_tokens) || 0), 1)
+
+  const subFresh = Number(split.subagent?.fresh_input_tokens) || 0
+  const directFresh = Number(split.direct?.fresh_input_tokens) || 0
+  const freshShare = subFresh + directFresh ? Math.round(subFresh / (subFresh + directFresh) * 100) : 0
+
+  return jsx(Card, {
+    title,
+    icon,
+    hint: `${data.window_days}-day window · read-only aggregate, no message content`,
+    children: [
+      jsx('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: '12px' }, children: [
+        jsxs('div', { children: [
+          jsx('div', { style: { fontSize: '17px', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }, children: formatTokens(totals.fresh_input_tokens) }),
+          jsx('div', { style: { ...styles.label, fontSize: '10px' }, children: 'fresh input' })
+        ] }, 'tk-fresh'),
+        jsxs('div', { children: [
+          jsx('div', { style: { fontSize: '17px', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: COLORS.accent }, children: `${totals.cache_hit_pct ?? '—'}%` }),
+          jsx('div', { style: { ...styles.label, fontSize: '10px' }, children: 'cache hit' })
+        ] }, 'tk-hit'),
+        jsxs('div', { children: [
+          jsx('div', { style: { fontSize: '17px', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }, children: formatTokens(totals.output_tokens) }),
+          jsx('div', { style: { ...styles.label, fontSize: '10px' }, children: `output · ${totals.fresh_to_output_ratio || '—'}` })
+        ] }, 'tk-out')
+      ] }, 'tk-totals'),
+      daily.length ? jsx('div', { style: { display: 'grid', gap: '6px', marginBottom: '12px' }, children: daily.map((row) => jsxs('div', {
+        children: [
+          jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '10px', marginBottom: '3px' }, children: [
+            jsx('span', { style: { fontSize: '11px', fontFamily: 'ui-monospace, monospace', color: COLORS.muted }, children: row.day?.slice(5) || row.day }),
+            jsxs('span', { style: { fontSize: '11px', fontVariantNumeric: 'tabular-nums' }, children: [
+              jsx('span', { style: { fontWeight: 650 }, children: formatTokens(row.fresh_input_tokens) }),
+              jsx('span', { style: { color: Number(row.cache_hit_pct) >= 90 ? COLORS.good : COLORS.warn }, children: ` · ${row.cache_hit_pct ?? '—'}% cached` })
+            ] })
+          ] }),
+          jsx('div', { style: { height: '5px', borderRadius: '999px', background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }, role: 'img', 'aria-label': `${row.day}: ${row.fresh_input_tokens} fresh input tokens, ${row.cache_hit_pct}% cache hit`, children: jsx('div', { style: { height: '100%', width: `${(Number(row.fresh_input_tokens) || 0) / maxFresh * 100}%`, borderRadius: '999px', background: COLORS.accent, opacity: 0.7 } }) })
+        ]
+      }, `tkd-${row.day}`)) }) : null,
+      replay.tool_results_replayed_tokens_est ? jsx('div', { style: { display: 'grid', gap: '5px' }, children: [
+        jsx('div', { style: { ...styles.label, fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em' }, children: `Replay leaders · ~${formatTokens(replay.tool_results_replayed_tokens_est)} replayed from tool results` }),
+        (replay.top_tools || []).slice(0, 4).map((row) => jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '10px' }, children: [
+          jsx('span', { style: { fontSize: '11px', fontFamily: 'ui-monospace, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: row.tool }),
+          jsx('span', { style: { flexShrink: 0, fontSize: '11px', fontVariantNumeric: 'tabular-nums', color: COLORS.muted }, children: `~${formatTokens(row.replayed_tokens_est)}` })
+        ] }, `tkt-${row.tool}`)),
+        (replay.top_sessions || []).length ? jsx('div', { style: { ...styles.label, fontSize: '10px', marginTop: '4px' }, children: `heaviest session: ${replay.top_sessions[0].session_id} (~${formatTokens(replay.top_sessions[0].replayed_tool_tokens_est)})` }) : null
+      ] }) : null,
+      subFresh || directFresh ? jsx('div', { style: { ...styles.label, fontSize: '10px', marginTop: '10px' }, children: `Subagents took ${freshShare}% of fresh input (${formatTokens(subFresh)} of ${formatTokens(subFresh + directFresh)})` }) : null
+    ]
+  })
+}
+
 function EventsCard({ events }) {
   const [filter, setFilter] = useState('all')
   const [expanded, setExpanded] = useState(false)
@@ -3107,6 +3190,7 @@ function Dashboard({ api }) {
         jsx('div', { style: styles.leadRow, children: jsx(LifecycleCard, { api }) }),
         jsx('div', { style: styles.supportGrid, children: [
           jsx(ToolCallsCard, { api }),
+          jsx(TokenUsageCard, { api }),
           jsx(HookFlowCard, { events: data.events }),
           jsx(EventsCard, { events: data.events })
         ] })
