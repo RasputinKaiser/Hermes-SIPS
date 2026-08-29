@@ -2261,10 +2261,23 @@ def render(payload: dict[str, Any], title: str) -> str:
         checks = payload["checks"]
         if isinstance(checks, dict):
             for key, value in checks.items():
-                lines.append(f"- **{key}** `{value}`")
+                lines.append(f"- {_glyph('ok' if value in (True, 'ok', 'passed', 'passed') else value)} **{key}** `{value}`")
         else:
             for item in checks if isinstance(checks, list) else []:
                 lines.append(f"- `{item}`")
+    if "receipts" in payload:
+        receipts = payload["receipts"] if isinstance(payload["receipts"], list) else []
+        ok_count = sum(1 for item in receipts if isinstance(item, dict) and item.get("ok"))
+        if receipts:
+            lines.append("")
+            lines.append("## Receipts")
+            lines.append(f"- **passed** `{ok_count}/{len(receipts)}` {_bar(ok_count, len(receipts))}")
+            for item in receipts[:12]:
+                if not isinstance(item, dict):
+                    continue
+                label = item.get("label") or item.get("command") or "receipt"
+                glyph = _glyph("ok" if item.get("ok") else "failed")
+                lines.append(f"- {glyph} `{label}` ok=`{item.get('ok')}`")
     if "task_exposure" in payload:
         task = payload["task_exposure"] if isinstance(payload["task_exposure"], dict) else {}
         lines.append("")
@@ -2296,10 +2309,17 @@ def render(payload: dict[str, Any], title: str) -> str:
         for key, value in payload["git"].items():
             lines.append(f"- **{key}** `{value}`")
     if "receipts" in payload:
-        lines.append("")
-        lines.append("## Receipts")
-        for item in payload["receipts"]:
-            lines.append(f"- `{item.get('label')}` rc=`{item.get('returncode')}` ok=`{item.get('ok')}`")
+        # Receipts already render with a pass bar near the top; keep the
+        # returncode detail here without repeating the section header.
+        rc_rows = [
+            f"- `{item.get('label')}` rc=`{item.get('returncode')}` ok=`{item.get('ok')}`"
+            for item in payload["receipts"]
+            if isinstance(item, dict)
+        ]
+        if rc_rows:
+            lines.append("")
+            lines.append("## Receipt Detail")
+            lines.extend(rc_rows)
     if "risks" in payload:
         lines.append("")
         lines.append("## Context Risks")
