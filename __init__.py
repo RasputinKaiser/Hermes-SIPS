@@ -28,6 +28,13 @@ except ImportError as exc:
         sys.path.insert(0, str(_PLUGIN_ROOT))
     import hermes_adapter  # type: ignore[no-redef]
 
+try:
+    from .scripts import sips_chat_cards as _cards
+except ImportError:
+    if str(_SCRIPTS_ROOT) not in sys.path:
+        sys.path.insert(0, str(_SCRIPTS_ROOT))
+    import sips_chat_cards as _cards  # type: ignore[no-redef]
+
 
 def _load_homebase():
     hermes_adapter.configure_environment()
@@ -68,6 +75,37 @@ def _json_tool(homebase: Any, name: str, args: dict[str, Any]) -> dict[str, Any]
         return {"text": raw}
 
 
+def _structured_of(homebase: Any, name: str, args: dict[str, Any]) -> dict[str, Any]:
+    """Structured content of a tool call, falling back to parsed JSON text."""
+    try:
+        result = homebase.call_tool(name, args if isinstance(args, dict) else {})
+    except Exception as exc:
+        logger.warning("SIPS tool %s failed: %s", name, type(exc).__name__)
+        return {"ok": False, "error": f"{type(exc).__name__}"}
+    if isinstance(result, str):
+        try:
+            value = json.loads(result)
+            return value if isinstance(value, dict) else {"value": value}
+        except json.JSONDecodeError:
+            return {"text": result}
+    structured = result.get("structuredContent")
+    if isinstance(structured, dict):
+        return structured
+    return result if isinstance(result, dict) else {}
+
+
+def _card_result(homebase: Any, tool: str, args: dict[str, Any], card) -> str:
+    """Call a tool and render it as a rich in-chat card."""
+    payload = _structured_of(homebase, tool, args)
+    if payload.get("text") and not isinstance(payload.get("text"), str):
+        payload = {"ok": False, "error": "unrenderable tool response"}
+    try:
+        return card(payload)
+    except Exception:
+        logger.debug("SIPS card render failed for %s", tool, exc_info=True)
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
 def _pretty_result(payload: dict[str, Any]) -> str:
     content = payload.get("content")
     if isinstance(content, list):
@@ -88,24 +126,27 @@ def _workspace_root() -> str:
 
 
 def _command_status(homebase: Any, _raw: str) -> str:
-    return _pretty_result(_json_tool(homebase, "homebase_status", {"root": str(_PLUGIN_ROOT)}))
+    return _card_result(homebase, "homebase_status", {"root": str(_PLUGIN_ROOT)}, _cards.status_card)
 
 
 def _command_routes(homebase: Any, _raw: str) -> str:
-    return _pretty_result(_json_tool(homebase, "homebase_routes", {"root": _workspace_root()}))
+    return _card_result(homebase, "homebase_routes", {"root": _workspace_root()}, _cards.routes_card)
 
 
 def _command_recall(homebase: Any, raw: str) -> str:
     query = raw.strip()
     if not query:
         return "Usage: /recall <what to search for>"
-    return _pretty_result(
-        _json_tool(homebase, "homebase_recall", {"root": _workspace_root(), "query": query, "limit": 4})
+    return _card_result(
+        homebase,
+        "homebase_recall",
+        {"root": _workspace_root(), "query": query, "limit": 4},
+        _cards.recall_card,
     )
 
 
 def _command_goal(homebase: Any, _raw: str) -> str:
-    return _pretty_result(_json_tool(homebase, "homebase_goal", {"root": _workspace_root()}))
+    return _card_result(homebase, "homebase_goal", {"root": _workspace_root()}, _cards.goal_card)
 
 
 def _command_selfloop(homebase: Any, raw: str) -> str:
@@ -119,13 +160,16 @@ def _command_selfloop(homebase: Any, raw: str) -> str:
             return "Usage: /selfloop record <improved|plateau|blocked> <proof-bearing summary>"
         args["outcome"] = parts[1]
         args["summary"] = " ".join(parts[2:])
-    return _pretty_result(_json_tool(homebase, "homebase_selfloop", args))
+    return _card_result(homebase, "homebase_selfloop", args, _cards.selfloop_card)
 
 
 def _command_verify(homebase: Any, raw: str) -> str:
     run_tests = any(token in {"--tests", "tests", "--run-tests"} for token in raw.split())
-    return _pretty_result(
-        _json_tool(homebase, "homebase_verify", {"root": str(_PLUGIN_ROOT), "run_tests": run_tests})
+    return _card_result(
+        homebase,
+        "homebase_verify",
+        {"root": str(_PLUGIN_ROOT), "run_tests": run_tests},
+        _cards.verify_card,
     )
 
 
@@ -135,22 +179,21 @@ def _command_record(homebase: Any, raw: str) -> str:
     title, body = (part.strip() for part in raw.split("::", 1))
     if not title or not body:
         return "Usage: /sips-record <title> :: <body>"
-    return _pretty_result(
-        _json_tool(
-            homebase,
-            "homebase_record",
-            {
-                "root": _workspace_root(),
-                "tier": "learning",
-                "title": title,
-                "body": body,
-                "scope": _workspace_root(),
-                "tags": "learning,hermes,sips",
-                "confidence": "medium",
-                "status": "active",
-                "provenance": "Hermes /sips-record command",
-            },
-        )
+    return _card_result(
+        homebase,
+        "homebase_record",
+        {
+            "root": _workspace_root(),
+            "tier": "learning",
+            "title": title,
+            "body": body,
+            "scope": _workspace_root(),
+            "tags": "learning,hermes,sips",
+            "confidence": "medium",
+            "status": "active",
+            "provenance": "Hermes /sips-record command",
+        },
+        _cards.record_card,
     )
 
 
