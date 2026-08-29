@@ -243,7 +243,7 @@ def _lifecycle_summary() -> dict[str, Any]:
             if status in ("denied", "blocked") and len(denials) < 10:
                 denials.append({"ts": timestamp, "tool": tool, "session_id": session_id})
 
-        if session_id:
+        if session_id and session_id != "unknown":
             entry = sessions.setdefault(
                 session_id,
                 {"session_id": session_id, "events": 0, "first_ts": None, "last_ts": None, "tools": set()},

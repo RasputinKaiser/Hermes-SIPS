@@ -1934,7 +1934,7 @@ def lifecycle_summary(root: Path | None = None) -> dict[str, Any]:
             tool_counts[tool] = tool_counts.get(tool, 0) + 1
             if status in ("error", "failed", "denied", "blocked"):
                 tool_errors[tool] = tool_errors.get(tool, 0) + 1
-        if session_id:
+        if session_id and session_id != "unknown":
             session_counts[session_id] = session_counts.get(session_id, 0) + 1
 
     tools = sorted(tool_counts.items(), key=lambda kv: (-kv[1], kv[0]))[:8]
