@@ -36,6 +36,7 @@ except Exception:  # pragma: no cover - memory is optional at runtime
 router = APIRouter()
 
 RECENT_EVENT_LIMIT = 40  # events kept in the /status payload for drill-down
+HOOK_EVENT_WINDOW = 5000  # max hook events scanned for the lifecycle lens
 
 
 def _now() -> str:
@@ -159,6 +160,153 @@ def _surface_counts(payload: dict[str, Any]) -> dict[str, int]:
     }
 
 
+def _read_hook_events() -> list[dict[str, Any]]:
+    """Read the last HOOK_EVENT_WINDOW events from the hook stream, oldest first.
+
+    The stream is append-only and bounded by housekeeping; we still cap the
+    scan window so a pathological file cannot blow the payload budget.
+    """
+    path = hook_events_path()
+    if not path.is_file():
+        return []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    events: list[dict[str, Any]] = []
+    for line in lines[-HOOK_EVENT_WINDOW:]:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            item = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(item, dict):
+            events.append(item)
+    return events
+
+
+def _ts_hour(timestamp: Any) -> str | None:
+    """Bucket an ISO timestamp into a ``YYYY-MM-DDTHH`` hour key."""
+    if not isinstance(timestamp, str) or len(timestamp) < 13:
+        return None
+    return timestamp[:13]
+
+
+def _lifecycle_summary() -> dict[str, Any]:
+    """Aggregate the hook stream into the bounded lifecycle lens.
+
+    Deliberately summary-shaped: per-tool outcome counts, per-session rollup,
+    denied/blocked events, and an hourly histogram. No payloads, prompts, or
+    raw tool arguments ever leave the host.
+    """
+    events = _read_hook_events()
+    if not events:
+        return {
+            "available": False,
+            "total_events": 0,
+            "window_events": 0,
+            "tools": [],
+            "sessions": [],
+            "denials": [],
+            "histogram": [],
+            "claim_boundary": "Lifecycle lens is a bounded summary of hook stream metadata; tool arguments and payloads are excluded.",
+        }
+
+    outcome_by_tool: dict[str, dict[str, int]] = {}
+    sessions: dict[str, dict[str, Any]] = {}
+    denials: list[dict[str, Any]] = []
+    histogram: dict[str, int] = {}
+    total_seen = 0
+
+    for item in events:
+        total_seen += 1
+        event = str(item.get("event") or "lifecycle")
+        tool = str(item.get("tool_name") or "")[:40]
+        status = str(item.get("status") or "")
+        session_id = str(item.get("session_id") or "")[:48]
+        timestamp = item.get("timestamp") or item.get("ts")
+
+        if tool and event in ("pre_tool_call", "post_tool_call"):
+            bucket = outcome_by_tool.setdefault(tool, {"allowed": 0, "ok": 0, "error": 0, "denied": 0, "other": 0})
+            if status == "allowed":
+                bucket["allowed"] += 1
+            elif status == "ok":
+                bucket["ok"] += 1
+            elif status in ("error", "failed"):
+                bucket["error"] += 1
+            elif status in ("denied", "blocked"):
+                bucket["denied"] += 1
+            else:
+                bucket["other"] += 1
+            if status in ("denied", "blocked") and len(denials) < 10:
+                denials.append({"ts": timestamp, "tool": tool, "session_id": session_id})
+
+        if session_id:
+            entry = sessions.setdefault(
+                session_id,
+                {"session_id": session_id, "events": 0, "first_ts": None, "last_ts": None, "tools": set()},
+            )
+            entry["events"] += 1
+            first, last = entry["first_ts"], entry["last_ts"]
+            if isinstance(timestamp, str):
+                if first is None or timestamp < first:
+                    entry["first_ts"] = timestamp
+                if last is None or timestamp > last:
+                    entry["last_ts"] = timestamp
+            if tool and event in ("pre_tool_call", "post_tool_call"):
+                entry["tools"].add(tool)
+
+        hour = _ts_hour(timestamp)
+        if hour:
+            histogram[hour] = histogram.get(hour, 0) + 1
+
+    tool_rows = [
+        {
+            "tool": tool,
+            **counts,
+            "total": sum(counts.values()),
+        }
+        for tool, counts in outcome_by_tool.items()
+    ]
+    tool_rows.sort(key=lambda row: (-row["total"], row["tool"]))
+
+    session_rows = []
+    for entry in sessions.values():
+        session_rows.append(
+            {
+                "session_id": entry["session_id"],
+                "events": entry["events"],
+                "first_ts": entry["first_ts"],
+                "last_ts": entry["last_ts"],
+                "tool_count": len(entry["tools"]),
+            }
+        )
+    session_rows.sort(key=lambda row: row["last_ts"] or "", reverse=True)
+
+    histogram_rows = [
+        {"hour": hour, "events": count}
+        for hour, count in sorted(histogram.items())[-24:]
+    ]
+
+    return {
+        "available": True,
+        "total_events": _event_count_estimate(events),
+        "window_events": total_seen,
+        "tools": tool_rows[:12],
+        "sessions": session_rows[:8],
+        "denials": denials,
+        "histogram": histogram_rows,
+        "claim_boundary": "Lifecycle lens is a bounded summary of hook stream metadata; tool arguments and payloads are excluded.",
+    }
+
+
+def _event_count_estimate(events: list[dict[str, Any]]) -> int:
+    """Cheap total: the window's max ts is the newest; the estimate is the count."""
+    return len(events)
+
+
 def _dashboard_payload() -> dict[str, Any]:
     payload = status_payload(PLUGIN_ROOT)
     manifest = payload.get("manifest") or {}
@@ -180,6 +328,7 @@ def _dashboard_payload() -> dict[str, Any]:
         "goal": _goal_summary(),
         "memory": _memory_summary(),
         "events": _event_summary(),
+        "lifecycle": _lifecycle_summary(),
         "claim_boundary": "Read-only summaries of local SIPS state. Raw memory, hook payloads, credentials, and write operations are excluded.",
     }
 
@@ -416,6 +565,17 @@ def get_action_history() -> dict[str, Any]:
         "entries": entries,
         "generated_at": _now(),
         "claim_boundary": "History records bounded action outcomes only; no raw tool payloads are retained.",
+    }
+
+
+@router.get("/lifecycle")
+def get_lifecycle() -> dict[str, Any]:
+    """Bounded lifecycle lens over the agent hook stream."""
+    return {
+        "schema": "sips.lifecycle.v1",
+        "generated_at": _now(),
+        **_lifecycle_summary(),
+        "schema_note": "total_events estimates the whole stream; window_events bounds the aggregation window.",
     }
 
 

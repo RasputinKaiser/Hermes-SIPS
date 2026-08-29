@@ -19,7 +19,7 @@ import time
 from pathlib import Path
 from typing import Any, Sequence
 
-from sips_paths import goal_state_path
+from sips_paths import goal_state_path, hook_events_path
 from sips_runtime.campaign_fleet import CampaignFleet, campaign_markdown
 
 UNKNOWN_PLUGIN_VERSION = "0.0.0"
@@ -1899,6 +1899,55 @@ def runtime_markdown(payload: dict[str, Any], title: str) -> str:
     return render(payload, title)[:8000]
 
 
+LIFECYCLE_WINDOW = 2000  # max hook events scanned for the status lifecycle section
+
+
+def lifecycle_summary(root: Path | None = None) -> dict[str, Any]:
+    """Bounded lifecycle lens over the agent hook stream (metadata only)."""
+    path = hook_events_path() if root is None else root / "hook_events.jsonl"
+    events: list[dict[str, Any]] = []
+    try:
+        if path.is_file():
+            lines = path.read_text(encoding="utf-8").splitlines()
+            for line in lines[-LIFECYCLE_WINDOW:]:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    item = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(item, dict):
+                    events.append(item)
+    except OSError:
+        return {"available": False, "window_events": 0, "tools": [], "sessions": []}
+
+    tool_counts: dict[str, int] = {}
+    tool_errors: dict[str, int] = {}
+    session_counts: dict[str, int] = {}
+    for item in events:
+        event = str(item.get("event") or "")
+        tool = str(item.get("tool_name") or "")[:40]
+        status = str(item.get("status") or "")
+        session_id = str(item.get("session_id") or "")[:48]
+        if tool and event in ("pre_tool_call", "post_tool_call"):
+            tool_counts[tool] = tool_counts.get(tool, 0) + 1
+            if status in ("error", "failed", "denied", "blocked"):
+                tool_errors[tool] = tool_errors.get(tool, 0) + 1
+        if session_id:
+            session_counts[session_id] = session_counts.get(session_id, 0) + 1
+
+    tools = sorted(tool_counts.items(), key=lambda kv: (-kv[1], kv[0]))[:8]
+    sessions = sorted(session_counts.items(), key=lambda kv: (-kv[1], kv[0]))[:5]
+    return {
+        "available": True,
+        "window_events": len(events),
+        "tools": [{"tool": tool, "total": total, "issues": tool_errors.get(tool, 0)} for tool, total in tools],
+        "sessions": [{"session_id": session, "events": count} for session, count in sessions],
+        "claim_boundary": "Lifecycle lens summarizes hook stream metadata only; tool arguments and payloads are excluded.",
+    }
+
+
 def render(payload: dict[str, Any], title: str) -> str:
     lines = [f"# {title}", ""]
     for key, value in payload.items():
@@ -1921,6 +1970,18 @@ def render(payload: dict[str, Any], title: str) -> str:
         lines.append(f"- **catalog warnings / errors** `{len(runtime.get('warnings') or [])} / {len(runtime.get('errors') or [])}`")
         if runtime.get("error"):
             lines.append(f"- **probe error** `{runtime['error']}`")
+    if "lifecycle" in payload:
+        lifecycle = payload["lifecycle"] if isinstance(payload["lifecycle"], dict) else {}
+        if lifecycle.get("available"):
+            lines.append("")
+            lines.append("## Lifecycle Lens")
+            lines.append(f"- **window events** `{lifecycle.get('window_events', 0)}`")
+            for row in lifecycle.get("tools") or []:
+                issues = row.get("issues") or 0
+                suffix = f" ({issues} issues)" if issues else ""
+                lines.append(f"- **{row.get('tool')}** `{row.get('total', 0)} calls{suffix}`")
+            for row in lifecycle.get("sessions") or []:
+                lines.append(f"- **session** `{row.get('session_id')}` events=`{row.get('events', 0)}`")
     if "receipt" in payload:
         receipt = payload["receipt"] if isinstance(payload["receipt"], dict) else {}
         lines.append("")
@@ -2050,6 +2111,7 @@ def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     root = workspace_root(arguments.get("root")) if arguments.get("root") else plugin_root()
     if name == "homebase_status":
         payload = status_payload(root)
+        payload["lifecycle"] = lifecycle_summary(root)
         return tool_result(
             payload,
             render(payload, "Harness Homebase Status"),
