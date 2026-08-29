@@ -252,3 +252,43 @@ def test_audit_card_all_green_and_problems() -> None:
     assert "🟡 `1` disabled" in bad
     assert "🔴 `1` untrusted" in bad
     assert "🟡 `1` unhashed" in bad
+
+
+def test_tool_icons_match_panel_and_fallback() -> None:
+    """Chat icons mirror the panel's TOOL_ICONS; unknown tools get the gear."""
+    assert cards.tool_icon("terminal") == "❯"
+    assert cards.tool_icon("read_file") == "📖"
+    assert cards.tool_icon("mcp__sips_homebase__homebase_status") == "🔌"
+    assert cards.tool_icon("totally_unknown_tool") == "⚙"
+    assert cards.tool_icon(None) == "⚙"
+
+
+def test_hook_event_icons_ordered_prefix_match() -> None:
+    """First prefix match wins; end_record beats end; unknown gets dot."""
+    assert cards.hook_event_icon("pre_tool_call") == "⏳"
+    assert cards.hook_event_icon("post_tool_call") == "⏱"
+    assert cards.hook_event_icon("on_session_end_record") == "💾"
+    assert cards.hook_event_icon("on_session_end") == "⏹"
+    assert cards.hook_event_icon("subagent_start") == "🚀"
+    assert cards.hook_event_icon("mystery_event") == "·"
+
+
+def test_lifecycle_card_renders_hook_flow_with_icons() -> None:
+    payload = {
+        "available": True,
+        "window_events": 10,
+        "total_events": 10,
+        "event_mix": [
+            {"event": "pre_tool_call", "count": 6},
+            {"event": "post_tool_call", "count": 4},
+        ],
+        "tools": [{"tool": "terminal", "allowed": 5, "ok": 5, "error": 0, "denied": 0, "other": 0, "total": 5}],
+        "sessions": [],
+        "denials": [],
+        "histogram": [],
+        "claim_boundary": "cb",
+    }
+    card = cards.lifecycle_card(payload)
+    assert "**Hook flow**" in card
+    assert "⏳" in card and "⏱" in card
+    assert "❯ `terminal`" in card

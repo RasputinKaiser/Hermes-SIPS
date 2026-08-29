@@ -212,6 +212,7 @@ def _lifecycle_summary() -> dict[str, Any]:
             "sessions": [],
             "denials": [],
             "histogram": [],
+            "event_mix": [],
             "claim_boundary": "Lifecycle lens is a bounded summary of hook stream metadata; tool arguments and payloads are excluded.",
         }
 
@@ -219,6 +220,7 @@ def _lifecycle_summary() -> dict[str, Any]:
     sessions: dict[str, dict[str, Any]] = {}
     denials: list[dict[str, Any]] = []
     histogram: dict[str, int] = {}
+    event_mix: dict[str, int] = {}
     total_seen = 0
 
     for item in events:
@@ -228,6 +230,8 @@ def _lifecycle_summary() -> dict[str, Any]:
         status = str(item.get("status") or "")
         session_id = str(item.get("session_id") or "")[:48]
         timestamp = item.get("timestamp") or item.get("ts")
+
+        event_mix[event] = event_mix.get(event, 0) + 1
 
         if tool and event in ("pre_tool_call", "post_tool_call"):
             bucket = outcome_by_tool.setdefault(tool, {"allowed": 0, "ok": 0, "error": 0, "denied": 0, "other": 0})
@@ -299,6 +303,10 @@ def _lifecycle_summary() -> dict[str, Any]:
         "sessions": session_rows[:8],
         "denials": denials,
         "histogram": histogram_rows,
+        "event_mix": [
+            {"event": event, "count": count}
+            for event, count in sorted(event_mix.items(), key=lambda kv: (-kv[1], kv[0]))[:8]
+        ],
         "claim_boundary": "Lifecycle lens is a bounded summary of hook stream metadata; tool arguments and payloads are excluded.",
     }
 

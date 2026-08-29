@@ -2597,7 +2597,10 @@ function ToolCallsCard({ api }) {
       return jsxs('div', {
         children: [
           jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '10px', marginBottom: '4px' }, children: [
-            jsx('span', { style: { fontSize: '12px', fontWeight: 650, fontFamily: 'ui-monospace, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: row.tool || 'unknown tool' }),
+            jsx('span', { style: { fontSize: '12px', fontWeight: 650, fontFamily: 'ui-monospace, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: [
+              jsx('span', { 'aria-hidden': true, style: { marginRight: '6px', flexShrink: 0 }, children: toolIcon(row.tool) }),
+              row.tool || 'unknown tool'
+            ] }),
             jsxs('span', { style: { flexShrink: 0, fontSize: '11px', fontVariantNumeric: 'tabular-nums' }, children: [
               jsx('span', { style: { color: COLORS.text, fontWeight: 650 }, children: compactNumber(total) }),
               issues ? jsx('span', { style: { color: COLORS.warn }, children: ` · ${issues} issue${issues === 1 ? '' : 's'}` }) : null
@@ -2621,15 +2624,74 @@ function ToolCallsCard({ api }) {
 
 // Hook-flow lens: the event-type mix over the most recent events, one
 // max-scaled bar per event type present, ordered by count descending.
+// Per-tool icons + per-event-type icons, shared by ToolCallsCard, HookFlowCard
+// and the chat cards (sips_chat_cards.py mirrors the tool map). One lookup for
+// exact names, then prefix rules for MCP/wrapper variants; fallback '⚙'.
+const TOOL_ICONS = {
+  terminal: '❯',
+  read_file: '📖',
+  write_file: '✍️',
+  patch: '🔧',
+  search_files: '🔎',
+  execute_code: '🐍',
+  vision_analyze: '👁',
+  skill_view: '📚',
+  skill_manage: '🛠',
+  skills_list: '📋',
+  session_search: '🧭',
+  memory: '🧠',
+  delegate_task: '🚀',
+  process: '⏯',
+  todo: '☑',
+  clarify: '❓',
+  web_search: '🌐',
+  web_extract: '📰',
+  browser_exec: '🌍',
+  browser: '🌍',
+  image_generate: '🎨',
+  cronjob: '⏰',
+  tour: '🧭',
+  tip: '💡',
+  setup_mcp: '🔌'
+}
+
+const TOOL_ICON_PREFIXES = [
+  [/^mcp__/, '🔌'],
+  [/^codex-/, '🧩']
+]
+
+function toolIcon(name) {
+  const key = String(name || '').trim()
+  if (TOOL_ICONS[key]) return TOOL_ICONS[key]
+  for (const [pattern, icon] of TOOL_ICON_PREFIXES) {
+    if (pattern.test(key)) return icon
+  }
+  return '⚙'
+}
+
 const HOOK_EVENT_ICONS = [
   [/^pre_tool_call/, '⏳'],
   [/^post_tool_call/, '⏱'],
-  [/^on_session/, '⟳'],
+  [/^pre_llm_call/, '🧮'],
+  [/^on_skill/, '📚'],
+  [/^on_session_start/, '▶'],
+  [/^on_session_end_record/, '💾'],
+  [/^on_session_end/, '⏹'],
+  [/^on_session_reset/, '⟳'],
+  [/^subagent_start/, '🚀'],
+  [/^subagent_stop/, '🛬'],
   [/^subagent/, '◈']
 ]
 function hookEventIcon(type) {
   const match = HOOK_EVENT_ICONS.find(([pattern]) => pattern.test(type))
-  return match ? match[1] : ''
+  return match ? match[1] : '·'
+}
+// Tone per hook event family: pre-calls are intent (muted), post-calls are
+// outcomes (accent), failures surface in red via the outcome mix.
+function hookEventBarColor(type) {
+  if (/^pre_/.test(type)) return COLORS.muted
+  if (/error|denied|blocked|fail/.test(type)) return COLORS.bad
+  return COLORS.accent
 }
 
 function HookFlowCard({ events }) {
@@ -2664,7 +2726,7 @@ function HookFlowCard({ events }) {
             style: { height: '5px', borderRadius: '999px', background: 'rgba(255,255,255,0.08)', overflow: 'hidden' },
             role: 'img',
             'aria-label': `${type}: ${count} events`,
-            children: jsx('div', { style: { height: '100%', width: `${count / maxCount * 100}%`, borderRadius: '999px', background: COLORS.accent, opacity: 0.75 } })
+            children: jsx('div', { style: { height: '100%', width: `${count / maxCount * 100}%`, borderRadius: '999px', background: hookEventBarColor(type), opacity: 0.75 } })
           })
         ]
       }, `hookflow-${type}`)) }),

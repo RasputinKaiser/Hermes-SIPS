@@ -54,6 +54,79 @@ def glyph(status: Any) -> str:
     return "·"
 
 
+# Per-tool icons for chat cards — mirrors TOOL_ICONS in the desktop panel's
+# plugin.js so /sips-lifecycle and /sips-usage render the same glyph a tool's
+# panel row does. Exact-name lookup, then prefix rules for MCP/wrapper
+# variants; fallback ⚙.
+TOOL_ICONS: dict[str, str] = {
+    "terminal": "❯",
+    "read_file": "📖",
+    "write_file": "✍️",
+    "patch": "🔧",
+    "search_files": "🔎",
+    "execute_code": "🐍",
+    "vision_analyze": "👁",
+    "skill_view": "📚",
+    "skill_manage": "🛠",
+    "skills_list": "📋",
+    "session_search": "🧭",
+    "memory": "🧠",
+    "delegate_task": "🚀",
+    "process": "⏯",
+    "todo": "☑",
+    "clarify": "❓",
+    "web_search": "🌐",
+    "web_extract": "📰",
+    "browser_exec": "🌍",
+    "browser": "🌍",
+    "image_generate": "🎨",
+    "cronjob": "⏰",
+    "tour": "🧭",
+    "tip": "💡",
+    "setup_mcp": "🔌",
+}
+
+TOOL_ICON_PREFIXES: list[tuple[str, str]] = [
+    ("mcp__", "🔌"),
+    ("codex-", "🧩"),
+]
+
+
+def tool_icon(name: Any) -> str:
+    key = str(name or "").strip()
+    if key in TOOL_ICONS:
+        return TOOL_ICONS[key]
+    for prefix, icon in TOOL_ICON_PREFIXES:
+        if key.startswith(prefix):
+            return icon
+    return "⚙"
+
+
+# Hook event-type icons for chat cards — mirrors HOOK_EVENT_ICONS in the
+# desktop panel. Ordered map (first match wins); fallback ·.
+HOOK_EVENT_ICONS_CHAT: list[tuple[str, str]] = [
+    ("pre_tool_call", "⏳"),
+    ("post_tool_call", "⏱"),
+    ("pre_llm_call", "🧮"),
+    ("on_skill", "📚"),
+    ("on_session_start", "▶"),
+    ("on_session_end_record", "💾"),
+    ("on_session_end", "⏹"),
+    ("on_session_reset", "⟳"),
+    ("subagent_start", "🚀"),
+    ("subagent_stop", "🛬"),
+    ("subagent", "◈"),
+]
+
+
+def hook_event_icon(event_type: Any) -> str:
+    key = str(event_type or "").strip()
+    for prefix, icon in HOOK_EVENT_ICONS_CHAT:
+        if key.startswith(prefix):
+            return icon
+    return "·"
+
+
 def sparkline(counts: list[Any]) -> str:
     try:
         nums = [max(0.0, float(c)) for c in counts]
@@ -315,7 +388,8 @@ def usage_card(payload: dict[str, Any]) -> str:
         lines.append("**Replay leaders (est)**")
         peak = max((t.get("replayed_tokens_est") or 0 for t in top_tools), default=1) or 1
         for t in top_tools[:4]:
-            lines.append(f"- {bar_of_max(t.get('replayed_tokens_est'), [peak])} `{t['tool']}` ≈`{fmt(t.get('replayed_tokens_est'))}`")
+            icon = tool_icon(t.get("tool"))
+            lines.append(f"- {bar_of_max(t.get('replayed_tokens_est'), [peak])} {icon} `{t['tool']}` ≈`{fmt(t.get('replayed_tokens_est'))}`")
     top_sessions = replay.get("top_sessions") or []
     if top_sessions:
         lines.append(f"- heaviest: `{str(top_sessions[0].get('session_id', ''))[:24]}…` ≈`{fmt(top_sessions[0].get('replayed_tool_tokens_est'))}`")
@@ -340,6 +414,19 @@ def lifecycle_card(payload: dict[str, Any]) -> str:
         lines.extend(_footer(payload.get("claim_boundary", "")))
         return "\n".join(lines).rstrip() + "\n"
     lines.append(f"**Window** `{payload.get('window_events', 0)}` events (of ~`{payload.get('total_events', 0)}` total)")
+    event_mix = payload.get("event_mix") or []
+    if event_mix:
+        lines.append("")
+        lines.append("**Hook flow**")
+        mix_peak = max((row.get("count", 0) for row in event_mix), default=1) or 1
+        for row in event_mix[:6]:
+            etype = str(row.get("event", "?"))
+            icon = hook_event_icon(etype)
+            tone = "blue" if etype.startswith("post_") else ("muted" if etype.startswith("pre_") else "neutral")
+            chip = {"blue": "🔵", "muted": "⚪", "neutral": ""}.get(tone, "")
+            lines.append(
+                f"- {bar(row.get('count', 0), mix_peak)} {icon} `{etype}` `{row.get('count', 0)}` {chip}".rstrip()
+            )
     tool_rows = payload.get("tools") or []
     totals = [row.get("total", 0) for row in tool_rows]
     if tool_rows:
@@ -350,7 +437,8 @@ def lifecycle_card(payload: dict[str, Any]) -> str:
             tone = "🔴" if issues else "🟢"
             track = bar_of_max(row.get("total", 0), totals)
             suffix = f" · 🔴 `{issues}` issues" if issues else ""
-            lines.append(f"- {track} `{row['tool']}` `{row.get('total', 0)}` {tone}{suffix}")
+            icon = tool_icon(row.get("tool"))
+            lines.append(f"- {track} {icon} `{row['tool']}` `{row.get('total', 0)}` {tone}{suffix}")
     sessions = payload.get("sessions") or []
     if sessions:
         lines.append("")
