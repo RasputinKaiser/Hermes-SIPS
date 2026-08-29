@@ -1727,6 +1727,9 @@ function RunDetail({ api, runId }) {
       (detail.labels || []).length ? jsx(Badge, { variant: 'outline', title: (detail.labels || []).map((entry) => entry.label).join(' · '), style: { ...styles.metaBadge, color: COLORS.accent, borderColor: COLORS.accent }, children: detail.labels[detail.labels.length - 1].label }) : null,
       detail.objective ? jsx('span', { style: styles.drillObjective, title: detail.objective, children: detail.objective }) : null
     ] }),
+    detail.status === 'failed' || detail.status === 'stale' ? jsx('div', { style: styles.drillReason, children: detail.status === 'failed'
+      ? 'This run ended with at least one task failure — expand tasks below for gate chips and answers.'
+      : 'This session went silent without landing a result — likely a crashed host or killed process.' }) : null,
     jsx(RunAnnotator, { api, runId, label: (detail.labels || []).length ? detail.labels[detail.labels.length - 1].label : undefined }),
     detail.revision !== undefined ? jsx('div', { style: styles.drillMeta, children: `revision ${detail.revision}` }) : null,
     detail.workspace_root ? jsx('div', { style: styles.drillMeta, title: detail.workspace_root, children: truncateMiddle(detail.workspace_root) }) : null,
@@ -2042,35 +2045,50 @@ function RunsCard({ api }) {
   }
 
   const entries = runs.runs || []
+  // Honest terminal summary: only statuses that actually have nonzero counts
+  // are shown, in a fixed order, e.g. '2 succeeded · 1 failed · 2 stale'.
+  const statusCounts = entries.reduce((acc, run) => {
+    acc[run.status] = (acc[run.status] || 0) + 1
+    return acc
+  }, {})
+  const statusSummary = ['succeeded', 'failed', 'stale']
+    .filter((status) => statusCounts[status] > 0)
+    .map((status) => `${statusCounts[status]} ${status}`)
+    .join(' · ')
   return jsx(Card, {
     title: `Runs · ${compactNumber(runs.total ?? entries.length)}`,
     icon: 'history',
     hint: `${Number(runs.active) > 0 ? `${runs.active} running now · ` : ''}Most recent sessions first; click a run to expand its detail.`,
-    children: entries.length ? jsx('div', {
-      style: styles.routeGrid,
-      children: entries.map((run, index) => jsx(DrillDownRow, {
-        id: run.run_id || `run-${index}`,
-        expanded: expandedId === (run.run_id || `run-${index}`),
-        onToggle: toggleExpanded,
-        detail: jsx(RunDetail, { api, runId: run.run_id || `run-${index}` }),
-        children: [
-          jsx('div', { style: styles.listMain, children: [
-            jsx('span', { style: styles.listId, title: run.label ? `${run.label} (${run.run_id})` : run.run_id, children: run.label ? `${run.label} · ${run.run_id || '?'}` : run.run_id || '?' }),
-            jsxs('span', { style: styles.listMeta, children: [
-              jsx('span', { style: { ...styles.value, fontVariantNumeric: 'tabular-nums' }, children: `${run.events ?? 0} events` }),
-              Number(run.receipts) > 0 ? jsx('span', { style: styles.taskAttempts, children: `${run.receipts} receipt${run.receipts === 1 ? '' : 's'}` }) : null,
-              run.progress?.total ? jsx('span', {
-                title: `${run.progress.succeeded} succeeded · ${run.progress.failed} failed · ${run.progress.active} active`,
-                style: { ...styles.value, fontVariantNumeric: 'tabular-nums', color: Number(run.progress.failed) > 0 ? COLORS.warn : COLORS.muted },
-                children: `${run.progress.succeeded}/${run.progress.total} tasks`
-              }) : null,
-              jsx(StateBadge, { value: run.status, tone: runStatusTone(run.status) }),
-              jsx('span', { style: styles.eventTime, children: formatRelativeTimestamp(run.updated_at) })
-            ] })
-          ] }),
-          run.objective ? jsx('div', { style: styles.listSecondary, title: run.objective, children: run.objective }) : null
-        ]
-      }, `run-${run.run_id || index}`))
+    children: entries.length ? jsxs('div', {
+      children: [
+        jsx('div', {
+          style: styles.routeGrid,
+          children: entries.map((run, index) => jsx(DrillDownRow, {
+            id: run.run_id || `run-${index}`,
+            expanded: expandedId === (run.run_id || `run-${index}`),
+            onToggle: toggleExpanded,
+            detail: jsx(RunDetail, { api, runId: run.run_id || `run-${index}` }),
+            children: [
+              jsx('div', { style: styles.listMain, children: [
+                jsx('span', { style: styles.listId, title: run.label ? `${run.label} (${run.run_id})` : run.run_id, children: run.label ? `${run.label} · ${run.run_id || '?'}` : run.run_id || '?' }),
+                jsxs('span', { style: styles.listMeta, children: [
+                  jsx('span', { style: { ...styles.value, fontVariantNumeric: 'tabular-nums' }, children: `${run.events ?? 0} events` }),
+                  Number(run.receipts) > 0 ? jsx('span', { style: styles.taskAttempts, children: `${run.receipts} receipt${run.receipts === 1 ? '' : 's'}` }) : null,
+                  run.progress?.total ? jsx('span', {
+                    title: `${run.progress.succeeded} succeeded · ${run.progress.failed} failed · ${run.progress.active} active`,
+                    style: { ...styles.value, fontVariantNumeric: 'tabular-nums', color: Number(run.progress.failed) > 0 ? COLORS.warn : COLORS.muted },
+                    children: `${run.progress.succeeded}/${run.progress.total} tasks`
+                  }) : null,
+                  jsx(StateBadge, { value: run.status, tone: runStatusTone(run.status) }),
+                  jsx('span', { style: styles.eventTime, children: formatRelativeTimestamp(run.updated_at) })
+                ] })
+              ] }),
+              run.objective ? jsx('div', { style: run.status === 'failed' ? { ...styles.listSecondary, color: COLORS.bad } : styles.listSecondary, title: run.objective, children: run.objective }) : null
+            ]
+          }, `run-${run.run_id || index}`))
+        }),
+        statusSummary ? jsx('div', { style: styles.drillMeta, children: statusSummary }) : null
+      ]
     }) : jsx('div', { style: styles.unavailable, children: 'No session runs recorded yet.' })
   })
 }
