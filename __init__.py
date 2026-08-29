@@ -220,6 +220,19 @@ def _command_freshness(homebase: Any, _raw: str) -> str:
     return _card_result(homebase, "homebase_mcp_freshness", {"root": str(_PLUGIN_ROOT)}, _cards.freshness_card)
 
 
+def _command_gates(_homebase: Any, _raw: str) -> str:
+    """Gate-evidence matrix via gate_matrix (direct import)."""
+    try:
+        from .scripts.gate_matrix import gate_matrix_payload
+    except ImportError:
+        from gate_matrix import gate_matrix_payload  # type: ignore[no-redef]
+    try:
+        return _cards.gate_matrix_card(gate_matrix_payload())
+    except Exception:
+        logger.debug("SIPS gate matrix card render failed", exc_info=True)
+        return "Gate matrix unavailable right now."
+
+
 def _command_audit(homebase: Any, _raw: str) -> str:
     return _card_result(homebase, "homebase_host_audit", {"root": str(_PLUGIN_ROOT)}, _cards.audit_card)
 
@@ -270,7 +283,7 @@ def _register_skills(ctx: Any) -> None:
 
 def _register_commands(ctx: Any, homebase: Any) -> None:
     direct = {
-        "sips": (lambda raw: "SIPS commands: /sips-status, /sips-routes, /sips-recall, /sips-goal, /sips-verify, /sips-record, /sips-usage, /sips-lifecycle, /sips-freshness, /sips-audit, /selfloop", "Show Hermes SIPS command help", "[help]"),
+        "sips": (lambda raw: "SIPS commands: /sips-status, /sips-routes, /sips-recall, /sips-goal, /sips-verify, /sips-record, /sips-usage, /sips-gates, /sips-lifecycle, /sips-freshness, /sips-audit, /selfloop", "Show Hermes SIPS command help", "[help]"),
         "sips-status": (partial(_command_status, homebase), "Inspect SIPS Homebase source status", ""),
         "sips-routes": (partial(_command_routes, homebase), "List SIPS Homebase routes", ""),
         "sips-recall": (partial(_command_recall, homebase), "Search scoped SIPS memory", "<query>"),
@@ -278,6 +291,7 @@ def _register_commands(ctx: Any, homebase: Any) -> None:
         "sips-verify": (partial(_command_verify, homebase), "Verify the vendored SIPS source", "[--tests]"),
         "sips-record": (partial(_command_record, homebase), "Record a bounded SIPS learning", "<title> :: <body>"),
         "sips-usage": (partial(_command_usage, homebase), "Show LLM token usage lens (days 1-30, default 7)", "[days]"),
+        "sips-gates": (partial(_command_gates, homebase), "Show gate-evidence matrix for recent runs", ""),
         "sips-lifecycle": (partial(_command_lifecycle, homebase), "Show the agent hook-stream lifecycle lens", ""),
         "sips-freshness": (partial(_command_freshness, homebase), "Check MCP source/cache/task freshness", ""),
         "sips-audit": (partial(_command_audit, homebase), "Audit live hook wiring and trust", ""),

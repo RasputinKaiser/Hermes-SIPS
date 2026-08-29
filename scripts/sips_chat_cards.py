@@ -514,6 +514,49 @@ def audit_card(payload: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def gate_matrix_card(payload: dict[str, Any]) -> str:
+    """Gate-evidence matrix: recent runs x 5 verification gates."""
+    lines = _header("🛡", "Gate Matrix", "recent runs x verification gates, from graph receipts")
+    if not payload.get("available"):
+        lines.append(f"*{payload.get('reason') or 'Runtime unavailable.'}*")
+        lines.extend(_footer(payload.get("claim_boundary", "")))
+        return "\n".join(lines).rstrip() + "\n"
+
+    gate_names = payload.get("gates") or []
+    runs = payload.get("runs") or []
+    if not runs:
+        lines.append("*No runtime runs yet — the matrix fills as sessions bridge to the graph runtime.*")
+        lines.extend(_footer(payload.get("claim_boundary", "")))
+        return "\n".join(lines).rstrip() + "\n"
+
+    lines.append(f"`{'  '.join(g.upper()[:4] for g in gate_names)}`  ← integrity · correctness · regression · resource · benefit")
+
+    def cell(status: Any) -> str:
+        return {"ok": "🟢", "failed": "🔴", "partial": "🟡", "skipped": "⚪"}.get(status, "·" if status is None else "❔")
+
+    gated = 0
+    for run in runs:
+        gates = run.get("gates") or {}
+        cells = "  ".join(cell(gates.get(name)) for name in gate_names)
+        if run.get("receipt"):
+            gated += 1
+            failed = run.get("failed_count") or 0
+            flag = " 🔴" if failed else ""
+            lines.append(f"- {cells} `{str(run.get('run_id', ''))[:22]}…`{flag}")
+        else:
+            lines.append(f"- {cells} `{str(run.get('run_id', ''))[:22]}…` *not yet gated*")
+
+    all_ok = sum(1 for r in runs if r.get("receipt") and (r.get("failed_count") or 0) == 0)
+    failed = sum(1 for r in runs if (r.get("failed_count") or 0) > 0)
+    lines.append("")
+    summary = f"**{gated}/{len(runs)} gated** · {all_ok} all-gates-pass"
+    if failed:
+        summary += f" · 🔴 {failed} with failures"
+    lines.append(summary)
+    lines.extend(_footer(payload.get("claim_boundary", "")))
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def selfloop_card(payload: dict[str, Any]) -> str:
     lines = _header("🔁", "SIPS Selfloop", "persistent improvement loop")
     raw_state = payload.get("state")

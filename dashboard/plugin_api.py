@@ -597,6 +597,14 @@ def get_token_usage(days: int = 7) -> dict[str, Any]:
     }
 
 
+@router.get("/gate-matrix")
+def get_gate_matrix() -> dict[str, Any]:
+    """Gate-evidence matrix: recent runs x the 5 verification gates (read-only)."""
+    from gate_matrix import gate_matrix_payload
+
+    return gate_matrix_payload()
+
+
 @router.get("/goal-board")
 def get_goal_board() -> dict[str, Any]:
     """Unified Goal Board view: runtime projection joined with legacy goal state.

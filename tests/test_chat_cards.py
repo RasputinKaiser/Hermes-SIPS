@@ -292,3 +292,36 @@ def test_lifecycle_card_renders_hook_flow_with_icons() -> None:
     assert "**Hook flow**" in card
     assert "⏳" in card and "⏱" in card
     assert "❯ `terminal`" in card
+
+
+def test_gate_matrix_card_renders_cells_and_summary() -> None:
+    payload = {
+        "available": True,
+        "gates": ["integrity", "correctness", "regression", "resource", "benefit"],
+        "runs": [
+            {"run_id": "h-20260829_020805_9c6566", "receipt": True,
+             "gates": {"integrity": "ok", "correctness": "ok", "regression": "ok", "resource": "ok", "benefit": "ok"},
+             "ok_count": 5, "failed_count": 0},
+            {"run_id": "h-20260829_140436_4660d0", "receipt": False,
+             "gates": {"integrity": None, "correctness": None, "regression": None, "resource": None, "benefit": None},
+             "ok_count": 0, "failed_count": 0},
+            {"run_id": "h-20260829_failed_run", "receipt": True,
+             "gates": {"integrity": "ok", "correctness": "failed", "regression": None, "resource": None, "benefit": None},
+             "ok_count": 1, "failed_count": 1},
+        ],
+        "claim_boundary": "cells only",
+    }
+    card = cards.gate_matrix_card(payload)
+    assert "🛡 Gate Matrix" in card
+    assert card.count("🟢") >= 6
+    assert "🔴" in card
+    assert "*not yet gated*" in card
+    assert "**2/3 gated** · 1 all-gates-pass · 🔴 1 with failures" in card
+    assert "🛡️ cells only" in card
+
+
+def test_gate_matrix_card_unavailable_and_empty() -> None:
+    card = cards.gate_matrix_card({"available": False, "reason": "runtime down", "claim_boundary": "cb"})
+    assert "runtime down" in card
+    empty = cards.gate_matrix_card({"available": True, "gates": cards.GATE_ORDER if hasattr(cards, 'GATE_ORDER') else [], "runs": [], "claim_boundary": ""})
+    assert "No runtime runs yet" in empty
