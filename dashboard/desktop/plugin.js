@@ -1982,6 +1982,7 @@ function FleetDetail({ api, campaignId }) {
       detail.objective ? jsx('span', { style: styles.drillObjective, title: detail.objective, children: detail.objective }) : null
     ] }),
     detail.revision !== undefined ? jsx('div', { style: styles.drillMeta, children: `revision ${detail.revision}` }) : null,
+    detail.foreground_child_id ? jsx('div', { style: styles.drillMeta, title: detail.foreground_child_id, children: `foreground ${truncateMiddle(detail.foreground_child_id, 24)}` }) : null,
     detail.runtime_run_id || detail.workspace_root ? jsx('div', {
       style: styles.drillMeta,
       title: [detail.runtime_run_id, detail.workspace_root].filter(Boolean).join(' · '),
@@ -2001,6 +2002,10 @@ function FleetDetail({ api, campaignId }) {
           ] })
         ] }),
         child.summary ? jsx('div', { style: { ...styles.listSecondary, whiteSpace: 'normal', lineHeight: 1.45 }, title: child.summary, children: child.summary }) : null,
+        (() => {
+          const meta = [child.task_id ? `task ${child.task_id}` : null, child.created_at ? `started ${formatRelativeTimestamp(child.created_at)}` : null, child.updated_at ? `updated ${formatRelativeTimestamp(child.updated_at)}` : null].filter(Boolean).join(' · ')
+          return meta ? jsx('div', { style: styles.drillMeta, title: meta, children: meta }) : null
+        })(),
         statusFeedback ? jsx(FleetComposerFeedback, { feedback: statusFeedback, error: statusFeedbackError }) : null
       ] }, `child-${child.child_id || index}`))
     ] }) : null,
@@ -2040,7 +2045,7 @@ function RunsCard({ api }) {
   return jsx(Card, {
     title: `Runs · ${compactNumber(runs.total ?? entries.length)}`,
     icon: 'history',
-    hint: 'Most recent sessions first; click a run to expand its detail.',
+    hint: `${Number(runs.active) > 0 ? `${runs.active} running now · ` : ''}Most recent sessions first; click a run to expand its detail.`,
     children: entries.length ? jsx('div', {
       style: styles.routeGrid,
       children: entries.map((run, index) => jsx(DrillDownRow, {
@@ -2053,6 +2058,7 @@ function RunsCard({ api }) {
             jsx('span', { style: styles.listId, title: run.label ? `${run.label} (${run.run_id})` : run.run_id, children: run.label ? `${run.label} · ${run.run_id || '?'}` : run.run_id || '?' }),
             jsxs('span', { style: styles.listMeta, children: [
               jsx('span', { style: { ...styles.value, fontVariantNumeric: 'tabular-nums' }, children: `${run.events ?? 0} events` }),
+              Number(run.receipts) > 0 ? jsx('span', { style: styles.taskAttempts, children: `${run.receipts} receipt${run.receipts === 1 ? '' : 's'}` }) : null,
               run.progress?.total ? jsx('span', {
                 title: `${run.progress.succeeded} succeeded · ${run.progress.failed} failed · ${run.progress.active} active`,
                 style: { ...styles.value, fontVariantNumeric: 'tabular-nums', color: Number(run.progress.failed) > 0 ? COLORS.warn : COLORS.muted },
