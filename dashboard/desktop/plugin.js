@@ -2512,6 +2512,121 @@ function EventsCard({ events }) {
   })
 }
 
+// Lifecycle lens: aggregates the agent hook stream (via GET /lifecycle) into
+// tool-usage bars, an hourly activity histogram, session rollups, and any
+// denials. Metadata only — the backend strips payloads and arguments.
+function LifecycleCard({ api }) {
+  const query = useQuery({ queryKey: ['sips-control-plane', 'lifecycle'], queryFn: () => api.rest('/lifecycle'), refetchInterval: pollInterval(30000) })
+
+  if (query.isLoading) {
+    return jsx(Card, { title: 'Lifecycle lens', icon: 'pulse', lead: true, children: jsx('div', { style: styles.unavailable, children: 'Reading the hook stream…' }) })
+  }
+  if (query.isError) {
+    return jsx(Card, { title: 'Lifecycle lens', icon: 'pulse', lead: true, children: jsx('div', { style: styles.unavailable, children: 'The lifecycle endpoint is unavailable right now. Retry from the header refresh.' }) })
+  }
+  const lifecycle = query.data
+  if (!lifecycle?.available) {
+    return jsx(Card, {
+      title: 'Lifecycle lens',
+      icon: 'pulse',
+      lead: true,
+      hint: 'Backed by the agent hook stream.',
+      children: jsx('div', { style: styles.unavailable, children: 'No hook stream is available yet — it fills as the SIPS lifecycle hooks observe tool calls and sessions.' })
+    })
+  }
+
+  const tools = (lifecycle.tools || []).slice(0, 8)
+  const maxTool = Math.max(...tools.map((row) => Number(row.total) || 0), 1)
+  const histogram = lifecycle.histogram || []
+  const maxHour = Math.max(...histogram.map((col) => Number(col.events) || 0), 1)
+  const sessions = lifecycle.sessions || []
+  const denials = lifecycle.denials || []
+
+  return jsx(Card, {
+    title: 'Lifecycle lens',
+    icon: 'pulse',
+    lead: true,
+    hint: `${compactNumber(lifecycle.window_events || 0)} events in window · ${compactNumber(lifecycle.total_events || 0)} total`,
+    children: [
+      // Tool bars: one row per tool, segmented by outcome class.
+      tools.length ? jsx('div', { style: { display: 'grid', gap: '7px' }, key: 'tools', children: tools.map((row) => {
+        const total = Number(row.total) || 0
+        const seg = (count) => `${(Number(count) || 0) / maxTool * 100}%`
+        const issues = (Number(row.error) || 0) + (Number(row.denied) || 0)
+        return jsxs('div', {
+          children: [
+            jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '3px' }, children: [
+              jsx('span', { style: { fontSize: '12px', fontWeight: 650 }, children: row.tool }),
+              jsxs('span', { style: { fontSize: '11px', color: issues ? COLORS.warn : COLORS.muted, fontVariantNumeric: 'tabular-nums' }, children: [
+                compactNumber(total),
+                issues ? ` · ${issues} issue${issues === 1 ? '' : 's'}` : ''
+              ] })
+            ] }),
+            jsx('div', {
+              style: { display: 'flex', height: '7px', borderRadius: '999px', overflow: 'hidden', background: 'rgba(255,255,255,0.06)' },
+              role: 'img',
+              'aria-label': `${row.tool}: ${total} events`,
+              children: [
+                jsx('div', { key: 'ok', style: { width: seg(row.ok), background: COLORS.good } }),
+                jsx('div', { key: 'allowed', style: { width: seg(row.allowed), background: COLORS.accent, opacity: 0.7 } }),
+                jsx('div', { key: 'issues', style: { width: seg(issues), background: COLORS.bad } }),
+                jsx('div', { key: 'other', style: { width: seg(row.other), background: COLORS.muted, opacity: 0.5 } })
+              ]
+            })
+          ]
+        }, `tool-${row.tool}`)
+      }) }) : jsx('div', { style: styles.unavailable, key: 'no-tools', children: 'No tool calls observed in the current window.' }),
+
+      // Activity histogram: one column per hour, height scaled to the max.
+      histogram.length ? jsxs('div', { key: 'histogram', children: [
+        jsx('div', { style: { ...styles.label, margin: '14px 0 5px' }, children: 'Activity by hour (UTC)' }),
+        jsx('div', { style: { display: 'flex', alignItems: 'flex-end', gap: '2px', height: '52px' }, children: histogram.map((col) => jsx('div', {
+          title: `${col.hour} — ${col.events} events`,
+          style: {
+            flex: 1,
+            minWidth: '3px',
+            height: `${Math.max(6, (Number(col.events) || 0) / maxHour * 100)}%`,
+            background: COLORS.accent,
+            opacity: 0.55,
+            borderRadius: '2px 2px 0 0'
+          }
+        }, col.hour)) }),
+        jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', marginTop: '3px' }, children: [
+          jsx('span', { style: { ...styles.label, fontSize: '10px' }, children: histogram[0]?.hour }),
+          jsx('span', { style: { ...styles.label, fontSize: '10px' }, children: histogram[histogram.length - 1]?.hour })
+        ] })
+      ] }, 'histogram') : null,
+
+      // Sessions: most recent first, id truncated.
+      sessions.length ? jsxs('div', { key: 'sessions', children: [
+        jsx('div', { style: { ...styles.label, margin: '14px 0 2px' }, children: 'Recent sessions' }),
+        sessions.slice(0, 6).map((session) => jsxs('div', { style: styles.row, children: [
+          jsx('span', { style: { fontSize: '12px', fontWeight: 600, fontFamily: 'var(--ui-mono, ui-monospace, monospace)', fontSizeAdjust: 'none' }, children: `${String(session.session_id || '').slice(0, 12)}…` }),
+          jsxs('span', { style: { ...styles.value, color: COLORS.muted }, children: [
+            `${compactNumber(session.events || 0)} events · ${session.tool_count || 0} tools`,
+            session.last_ts ? ` · ${formatRelativeTimestamp(session.last_ts)}` : ''
+          ] })
+        ] }, session.session_id))
+      ] }, 'sessions') : null,
+
+      // Denials: warn block, only when present.
+      denials.length ? jsx('div', {
+        style: { marginTop: '12px', border: `1px solid ${COLORS.warn}`, borderRadius: '10px', padding: '10px 12px', background: 'rgba(244,199,107,0.08)' },
+        key: 'denials',
+        children: [
+          jsx('div', { style: { fontSize: '12px', fontWeight: 700, color: COLORS.warn, marginBottom: '5px' }, children: `${denials.length} denied/blocked event${denials.length === 1 ? '' : 's'}` }),
+          ...denials.slice(0, 10).map((denial, index) => jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: COLORS.muted, padding: '2px 0' }, children: [
+            jsx('span', { children: denial.tool || 'unknown tool' }),
+            jsx('span', { children: formatRelativeTimestamp(denial.ts) })
+          ] }, `denial-${index}`))
+        ]
+      }) : null,
+
+      jsx('div', { style: { ...styles.label, fontSize: '11px', marginTop: '12px', lineHeight: 1.5 }, key: 'boundary', children: lifecycle.claim_boundary })
+    ]
+  })
+}
+
 const PROOF_DESCRIPTIONS = {
   repo_source: ['Repository source', 'The SIPS repository source was located and inspected.', 'This does not prove the installed desktop cache or live transport.'],
   worktree: ['Worktree', 'The local worktree was available for inspection.', 'This does not prove that the running host uses this worktree.'],
@@ -2555,33 +2670,45 @@ function ProofCard({ proof, actionState }) {
   })
 }
 
-function SurfaceCard({ counts }) {
+function SurfaceCard({ counts, lifecycle, onOpenActivity }) {
   const rows = [['Commands', counts?.commands], ['Agents', counts?.agents], ['Scripts', counts?.scripts], ['Hook event types', counts?.hook_events], ['MCP servers', counts?.mcp_servers], ['MCP tools', counts?.mcp_tools]]
   const max = Math.max(...rows.map(([, value]) => Number(value) || 0), 1)
+  const topTool = lifecycle?.available ? (lifecycle.tools || [])[0] : null
 
   return jsx(Card, {
     title: 'SIPS surface inventory',
     icon: 'layers',
     hint: 'Declared capability footprint across the local control plane.',
-    children: jsx('div', {
-      style: styles.proofList,
-      children: rows.map(([label, value]) => {
-        const amount = Number(value) || 0
-        const width = amount ? Math.max(8, Math.round((amount / max) * 100)) : 0
+    children: [
+      jsx('div', {
+        style: styles.proofList,
+        children: rows.map(([label, value]) => {
+          const amount = Number(value) || 0
+          const width = amount ? Math.max(8, Math.round((amount / max) * 100)) : 0
 
-        return jsx('div', {
-          style: styles.proofRow,
-          key: label,
-          children: [
-            jsx('div', {
-              style: styles.proofRowHeader,
-              children: [jsx('span', { style: styles.label, children: label }), jsx('span', { style: { ...styles.value, fontVariantNumeric: 'tabular-nums' }, children: compactNumber(amount) })]
-            }),
-            jsx('div', { style: styles.miniTrack, children: jsx('div', { style: { ...styles.miniFill, width: `${width}%`, background: COLORS.accent } }) })
-          ]
+          return jsx('div', {
+            style: styles.proofRow,
+            key: label,
+            children: [
+              jsx('div', {
+                style: styles.proofRowHeader,
+                children: [jsx('span', { style: styles.label, children: label }), jsx('span', { style: { ...styles.value, fontVariantNumeric: 'tabular-nums' }, children: compactNumber(amount) })]
+              }),
+              jsx('div', { style: styles.miniTrack, children: jsx('div', { style: { ...styles.miniFill, width: `${width}%`, background: COLORS.accent } }) })
+            ]
+          })
         })
-      })
-    })
+      }),
+      topTool ? jsxs('button', {
+        type: 'button',
+        onClick: onOpenActivity,
+        style: { marginTop: '10px', width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', padding: '7px 10px', border: `1px solid ${COLORS.border}`, borderRadius: '9px', background: 'transparent', cursor: 'pointer', color: 'inherit', font: 'inherit' },
+        children: [
+          jsxs('span', { style: { ...styles.label, textAlign: 'left' }, children: ['Busiest tool (window): ', jsx('span', { style: { fontWeight: 650, color: COLORS.text }, children: topTool.tool })] }),
+          jsxs('span', { style: { ...styles.value, color: COLORS.accent }, children: ['×', compactNumber(topTool.total), ' · view lens'] })
+        ]
+      }, 'lifecycle-chip') : null
+    ]
   })
 }
 
@@ -2770,7 +2897,7 @@ function Dashboard({ api }) {
           jsx(FleetCard, { api }),
           jsx(MemoryBrowser, { api }),
           jsx(MemoryCard, { memory: data.memory }),
-          jsx(SurfaceCard, { counts })
+          jsx(SurfaceCard, { counts, lifecycle: data.lifecycle, onOpenActivity: () => switchTab('activity') })
         ] })
       ] }) : null,
       activeTab === 'verification' ? jsxs('div', { children: [
@@ -2785,7 +2912,10 @@ function Dashboard({ api }) {
         jsx(RecallCard, { api }),
         jsx(RecordCard, { api })
       ] }) : null,
-      activeTab === 'activity' ? jsx(EventsCard, { events: data.events }) : null
+      activeTab === 'activity' ? jsxs('div', { children: [
+        jsx('div', { style: styles.leadRow, children: jsx(LifecycleCard, { api }) }),
+        jsx('div', { style: styles.supportGrid, children: jsx(EventsCard, { events: data.events }) })
+      ] }) : null
       ] })
     ] })
   ] }) })
