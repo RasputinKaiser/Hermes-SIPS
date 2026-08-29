@@ -299,7 +299,7 @@ def _register_skills(ctx: Any) -> None:
 
 def _register_commands(ctx: Any, homebase: Any) -> None:
     direct = {
-        "sips": (lambda raw: "SIPS commands: /sips-status, /sips-routes, /sips-recall, /sips-goal, /sips-verify, /sips-record, /sips-usage, /sips-gates, /sips-lifecycle, /sips-freshness, /sips-audit, /selfloop", "Show Hermes SIPS command help", "[help]"),
+        "sips": (lambda raw: "SIPS commands: /sips-status, /sips-routes, /sips-recall, /sips-goal, /sips-verify, /sips-record, /sips-usage, /sips-gates, /sips-quality, /sips-lifecycle, /sips-freshness, /sips-audit, /selfloop", "Show Hermes SIPS command help", "[help]"),
         "sips-status": (partial(_command_status, homebase), "Inspect SIPS Homebase source status", ""),
         "sips-routes": (partial(_command_routes, homebase), "List SIPS Homebase routes", ""),
         "sips-recall": (partial(_command_recall, homebase), "Search scoped SIPS memory", "<query>"),
