@@ -1698,7 +1698,20 @@ function RunDetail({ api, runId }) {
   }
   const budgetsLine = compactBudgets(detail.budgets, detail.budget_usage)
   const tasks = detail.tasks || []
+  const taskTokens = tasks.reduce((sum, task) => sum + (Number(task.tokens) || 0), 0)
   const events = (detail.events || []).slice() // chronological; most recent last
+  const [allEvents, setAllEvents] = useState(false)
+  const deepEvents = useQuery({
+    queryKey: ['sips-control-plane', 'run-events', runId],
+    queryFn: () => api.rest(`/runs/${encodeURIComponent(runId)}/events?limit=50`),
+    enabled: allEvents,
+    refetchInterval: pollInterval(30000)
+  })
+  const deepList = allEvents && deepEvents.data?.available ? (deepEvents.data.events || []) : []
+  const showDeep = deepList.length > events.length
+  // Shallow strip shows at most 6 rows until expanded; the deep fetch (when it
+  // lands, or errors → fallback) replaces the cap with the full trail.
+  const trailEvents = showDeep ? deepList : allEvents ? events : events.slice(0, 6)
 
   return jsxs('div', { style: styles.drillStack, children: [
     jsxs('div', { style: styles.drillHead, children: [
@@ -1718,6 +1731,8 @@ function RunDetail({ api, runId }) {
     detail.revision !== undefined ? jsx('div', { style: styles.drillMeta, children: `revision ${detail.revision}` }) : null,
     detail.workspace_root ? jsx('div', { style: styles.drillMeta, title: detail.workspace_root, children: truncateMiddle(detail.workspace_root) }) : null,
     budgetsLine ? jsx('div', { style: styles.drillMeta, children: budgetsLine }) : null,
+    detail.receipt_count > 0 ? jsx('div', { style: styles.drillMeta, children: `${detail.receipt_count} receipt${detail.receipt_count === 1 ? '' : 's'}` }) : null,
+    taskTokens > 0 ? jsx('div', { style: styles.drillMeta, children: `${compactNumber(taskTokens)} task tokens` }) : null,
     tasks.length ? jsxs('div', { style: styles.drillStack, children: [
       jsx('div', { style: styles.drillLabel, children: 'Tasks' }),
       ...tasks.map((task, index) => jsxs('div', { style: styles.listRow, children: [
@@ -1735,7 +1750,8 @@ function RunDetail({ api, runId }) {
             task.has_lesson ? jsxs('span', { style: styles.taskLessonChip, 'aria-label': 'Task receipt includes a lesson candidate', children: [
               jsx(Codicon, { name: 'lightbulb', size: '0.7rem' }),
               'lesson'
-            ] }, `lesson-${task.id || index}`) : null
+            ] }, `lesson-${task.id || index}`) : null,
+            Number(task.tokens) > 0 ? jsx('span', { style: styles.taskAttempts, children: `${compactNumber(Number(task.tokens))} tok` }) : null
           ] })
         ] }),
         task.answer ? jsx('div', { style: { ...styles.listSecondary, whiteSpace: 'normal', lineHeight: 1.45 }, title: task.answer, children: task.answer }) : null
@@ -1743,10 +1759,23 @@ function RunDetail({ api, runId }) {
     ] }) : null,
     events.length ? jsxs('div', { style: styles.drillStack, children: [
       jsx('div', { style: styles.drillLabel, children: 'Event trail' }),
-      ...events.map((event, index) => jsxs('div', { style: styles.eventRow, children: [
-        jsx('span', { style: styles.eventType, title: event.type, children: formatStatus(event.type) }),
-        jsx('span', { style: styles.eventTime, children: formatRelativeTimestamp(event.at) })
-      ] }, `event-${index}`))
+      ...trailEvents.map((event, index) => jsxs('div', { style: styles.drillStack, children: [
+        jsxs('div', { style: styles.eventRow, children: [
+          jsx('span', { style: styles.eventType, title: event.type, children: [
+            formatStatus(event.type),
+            event.task_id ? jsx('span', { style: { fontFamily: 'ui-monospace, monospace', fontSize: '11px', fontWeight: 400, color: COLORS.muted, marginLeft: '6px' }, children: event.task_id }) : null
+          ] }),
+          jsx('span', { style: styles.eventTime, children: formatRelativeTimestamp(event.at) })
+        ] }),
+        event.summary ? jsx('div', { style: { ...styles.drillMeta, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }, title: event.summary, children: event.summary }) : null
+      ] }, `event-${index}`)),
+      allEvents && deepEvents.isFetching && !showDeep ? jsx(Loader, { type: 'lemniscate-bloom' }) : null,
+      events.length > 6 ? jsx('div', { children: jsx(Button, {
+        variant: 'outline',
+        size: 'sm',
+        onClick: () => setAllEvents((value) => !value),
+        children: allEvents ? 'Show fewer' : `Show all ${events.length} events`
+      }) }) : null
     ] }) : null
   ] })
 }
