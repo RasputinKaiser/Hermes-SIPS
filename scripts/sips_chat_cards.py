@@ -261,6 +261,100 @@ def record_card(payload: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def lifecycle_card(payload: dict[str, Any]) -> str:
+    """Hook-stream lens: tool bars, session rollup, denials, activity sparkline."""
+    lines = _header("📡", "SIPS Lifecycle", "agent hook stream, metadata only")
+    if not payload.get("available"):
+        lines.append("*No hook stream available yet — it fills as SIPS lifecycle hooks observe tool calls and sessions.*")
+        lines.extend(_footer(payload.get("claim_boundary", "")))
+        return "\n".join(lines).rstrip() + "\n"
+    lines.append(f"**Window** `{payload.get('window_events', 0)}` events (of ~`{payload.get('total_events', 0)}` total)")
+    tool_rows = payload.get("tools") or []
+    totals = [row.get("total", 0) for row in tool_rows]
+    if tool_rows:
+        lines.append("")
+        lines.append("**Tool calls**")
+        for row in tool_rows:
+            issues = (row.get("error") or 0) + (row.get("denied") or 0)
+            tone = "🔴" if issues else "🟢"
+            track = bar_of_max(row.get("total", 0), totals)
+            suffix = f" · 🔴 `{issues}` issues" if issues else ""
+            lines.append(f"- {track} `{row['tool']}` `{row.get('total', 0)}` {tone}{suffix}")
+    sessions = payload.get("sessions") or []
+    if sessions:
+        lines.append("")
+        lines.append("**Recent sessions**")
+        peak = max((s.get("events", 0) for s in sessions), default=1) or 1
+        for session in sessions[:6]:
+            track = bar(session.get("events", 0), peak)
+            lines.append(f"- {track} `{str(session.get('session_id', ''))[:12]}…` `{session.get('events', 0)}` events · `{session.get('tool_count', 0)}` tools")
+    denials = payload.get("denials") or []
+    if denials:
+        lines.append("")
+        lines.append(f"**Denied / blocked** 🔴 `{len(denials)}`")
+        for denial in denials[:5]:
+            lines.append(f"- 🔴 `{denial.get('tool', '?')}` at `{denial.get('ts', '?')}`")
+    histogram = payload.get("histogram") or []
+    if histogram:
+        spark = sparkline([col.get("events", 0) for col in histogram])
+        peak_col = max(histogram, key=lambda col: col.get("events", 0))
+        lines.append("")
+        lines.append(f"**Activity (UTC)** `{spark}` peak `{peak_col.get('hour')} ×{peak_col.get('events')}`")
+    lines.extend(_footer(payload.get("claim_boundary", "")))
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def freshness_card(payload: dict[str, Any]) -> str:
+    """MCP freshness: overall verdict + per-layer glyph rows."""
+    lines = _header("⟳", "SIPS MCP Freshness", "source → cache → config → task surface")
+    status = payload.get("status", payload.get("overall_status", "unknown"))
+    lines.append(f"**Verdict** {glyph(status)} `{status}`")
+    checks = payload.get("checks") or {}
+    if checks:
+        lines.append("")
+        lines.append("**Layer checks**")
+        for key, value in checks.items():
+            lines.append(f"- {glyph('ok' if value in (True, 'ok', 'passed', 'fresh') else value)} `{key}` — `{fmt(value, 60)}`")
+    task = payload.get("task_exposure") if isinstance(payload.get("task_exposure"), dict) else {}
+    if task:
+        lines.append("")
+        present = len(task.get("present_tools") or [])
+        expected = len(payload.get("tools") or [])
+        lines.append(f"**Task surface** `{present}/{expected}` tools {bar(present, expected or 1)}")
+        lines.append(f"- inventory complete: {glyph('ok' if task.get('inventory_complete') else 'pending')} `{task.get('inventory_complete', False)}`")
+    lines.extend(_footer(payload.get("claim_boundary", "")))
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def audit_card(payload: dict[str, Any]) -> str:
+    """Host audit: hook trust/enablement at a glance."""
+    lines = _header("🩺", "SIPS Host Audit", "live hook wiring and trust")
+    status = payload.get("status", "unknown")
+    lines.append(f"**Result** {glyph(status)} `{status}`")
+    runtime = payload.get("runtime_hooks") if isinstance(payload.get("runtime_hooks"), dict) else {}
+    if runtime:
+        hooks = [item for item in (runtime.get("hooks") or []) if isinstance(item, dict)]
+        observed = runtime.get("observed_count", 0)
+        expected = runtime.get("expected_count", 0)
+        lines.append("")
+        lines.append(f"**Hook coverage** `{observed}/{expected}` {bar(observed, expected or 1)}")
+        disabled = sum(item.get("enabled") is not True for item in hooks)
+        untrusted = sum(item.get("trustStatus") != "trusted" for item in hooks)
+        unhashed = sum(not item.get("currentHash") for item in hooks)
+        if disabled:
+            lines.append(f"- 🟡 `{disabled}` disabled")
+        if untrusted:
+            lines.append(f"- 🔴 `{untrusted}` untrusted")
+        if unhashed:
+            lines.append(f"- 🟡 `{unhashed}` unhashed")
+        if not (disabled or untrusted or unhashed):
+            lines.append(f"- 🟢 all `{len(hooks)}` hooks enabled, trusted, hashed")
+        if runtime.get("error"):
+            lines.append(f"- 🔴 probe error: `{fmt(runtime['error'], 80)}`")
+    lines.extend(_footer(payload.get("claim_boundary", "")))
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def selfloop_card(payload: dict[str, Any]) -> str:
     lines = _header("🔁", "SIPS Selfloop", "persistent improvement loop")
     raw_state = payload.get("state")

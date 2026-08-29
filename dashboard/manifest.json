@@ -3,7 +3,7 @@
   "label": "SIPS Control Plane",
   "description": "Interactive SIPS mission control: tabbed workspace with live selfloop control, goal subtask management, memory recall/record, verification history with proof movement, and health telemetry for Hermes Desktop.",
   "icon": "Activity",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "tab": {
     "path": "/sips-control-plane",
     "position": "after:skills",

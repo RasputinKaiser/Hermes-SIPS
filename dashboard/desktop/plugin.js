@@ -2515,6 +2515,123 @@ function FleetCard({ api }) {
   })
 }
 
+// Tool-call lens: per-tool call volume from GET /lifecycle, one segmented bar
+// per tool (ok in good, error/denied in bad, other in muted) sized relative to
+// the busiest tool. Metadata only — mirrors LifecycleCard's data source.
+function ToolCallsCard({ api }) {
+  const query = useQuery({ queryKey: ['sips-control-plane', 'lifecycle'], queryFn: () => api.rest('/lifecycle'), refetchInterval: pollInterval(30000) })
+  const title = 'Tool call volume'
+  const icon = 'tools'
+
+  if (query.isLoading) {
+    return jsx(Card, { title, icon, children: jsx('div', { style: styles.unavailable, children: 'Reading tool usage…' }) })
+  }
+  if (query.isError) {
+    return jsx(Card, { title, icon, children: jsx('div', { style: styles.unavailable, children: 'The lifecycle endpoint is unavailable right now. Retry from the header refresh.' }) })
+  }
+  const lifecycle = query.data
+  if (!lifecycle?.available) {
+    return jsx(Card, {
+      title,
+      icon,
+      hint: 'Backed by the agent hook stream.',
+      children: jsx('div', { style: styles.unavailable, children: 'No tool-call data is available yet — it fills as the SIPS lifecycle hooks observe tool calls.' })
+    })
+  }
+
+  const tools = (lifecycle.tools || []).slice().sort((a, b) => (Number(b.total) || 0) - (Number(a.total) || 0)).slice(0, 6)
+  const maxTool = Math.max(...tools.map((row) => Number(row.total) || 0), 1)
+  const seg = (count) => `${(Number(count) || 0) / maxTool * 100}%`
+
+  return jsx(Card, {
+    title,
+    icon,
+    hint: `${compactNumber(lifecycle.window_events || 0)} events in window · top ${tools.length || 0} of ${compactNumber((lifecycle.tools || []).length)}`,
+    children: tools.length ? jsx('div', { style: { display: 'grid', gap: '9px' }, children: tools.map((row) => {
+      const total = Number(row.total) || 0
+      const issues = (Number(row.error) || 0) + (Number(row.denied) || 0)
+      return jsxs('div', {
+        children: [
+          jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '10px', marginBottom: '4px' }, children: [
+            jsx('span', { style: { fontSize: '12px', fontWeight: 650, fontFamily: 'ui-monospace, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: row.tool || 'unknown tool' }),
+            jsxs('span', { style: { flexShrink: 0, fontSize: '11px', fontVariantNumeric: 'tabular-nums' }, children: [
+              jsx('span', { style: { color: COLORS.text, fontWeight: 650 }, children: compactNumber(total) }),
+              issues ? jsx('span', { style: { color: COLORS.warn }, children: ` · ${issues} issue${issues === 1 ? '' : 's'}` }) : null
+            ] })
+          ] }),
+          jsx('div', {
+            style: { display: 'flex', height: '7px', borderRadius: '999px', overflow: 'hidden', background: 'rgba(255,255,255,0.08)' },
+            role: 'img',
+            'aria-label': `${row.tool}: ${total} calls, ${issues} with issues`,
+            children: [
+              jsx('div', { key: 'ok', style: { width: seg(row.ok), background: COLORS.good } }),
+              jsx('div', { key: 'issues', style: { width: seg(issues), background: COLORS.bad } }),
+              jsx('div', { key: 'other', style: { width: seg(row.other), background: COLORS.muted, opacity: 0.5 } })
+            ]
+          })
+        ]
+      }, `toolvol-${row.tool || 'unknown'}`)
+    }) }) : jsx('div', { style: styles.unavailable, children: 'No tool calls observed in the current window.' })
+  })
+}
+
+// Hook-flow lens: the event-type mix over the most recent events, one
+// max-scaled bar per event type present, ordered by count descending.
+const HOOK_EVENT_ICONS = [
+  [/^pre_tool_call/, '⏳'],
+  [/^post_tool_call/, '⏱'],
+  [/^on_session/, '⟳'],
+  [/^subagent/, '◈']
+]
+function hookEventIcon(type) {
+  const match = HOOK_EVENT_ICONS.find(([pattern]) => pattern.test(type))
+  return match ? match[1] : ''
+}
+
+function HookFlowCard({ events }) {
+  const recent = (events?.recent || []).slice(0, 40)
+  if (!events?.available || !recent.length) {
+    return jsx(Card, { title: 'Hook flow', icon: 'symbol-event', children: jsx('div', { style: styles.unavailable, children: 'No lifecycle events are available yet.' }) })
+  }
+
+  const tally = new Map()
+  for (const entry of recent) {
+    const type = entry.event || 'unknown'
+    tally.set(type, (tally.get(type) || 0) + 1)
+  }
+  const rows = [...tally.entries()].sort((a, b) => b[1] - a[1])
+  const maxCount = Math.max(...rows.map(([, count]) => count), 1)
+
+  return jsx(Card, {
+    title: 'Hook flow',
+    icon: 'symbol-event',
+    hint: `Event mix over the last ${compactNumber(recent.length)} of ${compactNumber(events.event_count || 0)} recorded events`,
+    children: [
+      jsx('div', { style: { display: 'grid', gap: '9px' }, children: rows.map(([type, count]) => jsxs('div', {
+        children: [
+          jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '10px', marginBottom: '4px' }, children: [
+            jsxs('span', { style: { display: 'inline-flex', alignItems: 'baseline', gap: '6px', minWidth: 0, fontSize: '12px', fontWeight: 650 }, children: [
+              hookEventIcon(type) ? jsx('span', { 'aria-hidden': true, style: { color: COLORS.muted, flexShrink: 0 }, children: hookEventIcon(type) }) : null,
+              jsx('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: formatStatus(type) })
+            ] }),
+            jsx('span', { style: { flexShrink: 0, color: COLORS.muted, fontSize: '11px', fontVariantNumeric: 'tabular-nums' }, children: compactNumber(count) })
+          ] }),
+          jsx('div', {
+            style: { height: '5px', borderRadius: '999px', background: 'rgba(255,255,255,0.08)', overflow: 'hidden' },
+            role: 'img',
+            'aria-label': `${type}: ${count} events`,
+            children: jsx('div', { style: { height: '100%', width: `${count / maxCount * 100}%`, borderRadius: '999px', background: COLORS.accent, opacity: 0.75 } })
+          })
+        ]
+      }, `hookflow-${type}`)) }),
+      events.recent_capped ? jsx('div', {
+        style: { ...styles.eventCapNote, textAlign: 'left', margin: '10px 0 0' },
+        children: `Showing the most recent ${compactNumber(recent.length)} of ${compactNumber(events.event_count || 0)} recorded events.`
+      }) : null
+    ]
+  })
+}
+
 function EventsCard({ events }) {
   const [filter, setFilter] = useState('all')
   const [expanded, setExpanded] = useState(false)
@@ -2988,7 +3105,11 @@ function Dashboard({ api }) {
       ] }) : null,
       activeTab === 'activity' ? jsxs('div', { children: [
         jsx('div', { style: styles.leadRow, children: jsx(LifecycleCard, { api }) }),
-        jsx('div', { style: styles.supportGrid, children: jsx(EventsCard, { events: data.events }) })
+        jsx('div', { style: styles.supportGrid, children: [
+          jsx(ToolCallsCard, { api }),
+          jsx(HookFlowCard, { events: data.events }),
+          jsx(EventsCard, { events: data.events })
+        ] })
       ] }) : null
       ] })
     ] })

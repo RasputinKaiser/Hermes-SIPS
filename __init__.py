@@ -197,6 +197,18 @@ def _command_record(homebase: Any, raw: str) -> str:
     )
 
 
+def _command_lifecycle(homebase: Any, _raw: str) -> str:
+    return _card_result(homebase, "homebase_lifecycle", {}, _cards.lifecycle_card)
+
+
+def _command_freshness(homebase: Any, _raw: str) -> str:
+    return _card_result(homebase, "homebase_mcp_freshness", {"root": str(_PLUGIN_ROOT)}, _cards.freshness_card)
+
+
+def _command_audit(homebase: Any, _raw: str) -> str:
+    return _card_result(homebase, "homebase_host_audit", {"root": str(_PLUGIN_ROOT)}, _cards.audit_card)
+
+
 def _workflow_handler(ctx: Any, command: str, raw: str) -> str:
     skill = {
         "improve": "sips-control-plane",
@@ -243,13 +255,16 @@ def _register_skills(ctx: Any) -> None:
 
 def _register_commands(ctx: Any, homebase: Any) -> None:
     direct = {
-        "sips": (lambda raw: "SIPS commands: /sips-status, /sips-routes, /sips-recall, /sips-goal, /sips-verify, /sips-record, /selfloop", "Show Hermes SIPS command help", "[help]"),
+        "sips": (lambda raw: "SIPS commands: /sips-status, /sips-routes, /sips-recall, /sips-goal, /sips-verify, /sips-record, /sips-lifecycle, /sips-freshness, /sips-audit, /selfloop", "Show Hermes SIPS command help", "[help]"),
         "sips-status": (partial(_command_status, homebase), "Inspect SIPS Homebase source status", ""),
         "sips-routes": (partial(_command_routes, homebase), "List SIPS Homebase routes", ""),
         "sips-recall": (partial(_command_recall, homebase), "Search scoped SIPS memory", "<query>"),
         "sips-goal": (partial(_command_goal, homebase), "Show SIPS goal state", ""),
         "sips-verify": (partial(_command_verify, homebase), "Verify the vendored SIPS source", "[--tests]"),
         "sips-record": (partial(_command_record, homebase), "Record a bounded SIPS learning", "<title> :: <body>"),
+        "sips-lifecycle": (partial(_command_lifecycle, homebase), "Show the agent hook-stream lifecycle lens", ""),
+        "sips-freshness": (partial(_command_freshness, homebase), "Check MCP source/cache/task freshness", ""),
+        "sips-audit": (partial(_command_audit, homebase), "Audit live hook wiring and trust", ""),
         "recall": (partial(_command_recall, homebase), "Recall scoped SIPS memory", "<query>"),
         "goal": (partial(_command_goal, homebase), "Show SIPS goal state", ""),
         "selfloop": (partial(_command_selfloop, homebase), "Inspect or update SIPS self-loop state", "<status|start|record> ..."),

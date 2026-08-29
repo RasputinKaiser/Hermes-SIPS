@@ -138,5 +138,70 @@ def test_cards_never_dump_raw_dicts() -> None:
 
 
 def test_all_command_cards_exist() -> None:
-    for name in ("status_card", "routes_card", "recall_card", "goal_card", "verify_card", "record_card", "selfloop_card"):
+    for name in ("status_card", "routes_card", "recall_card", "goal_card", "verify_card", "record_card", "selfloop_card", "lifecycle_card", "freshness_card", "audit_card"):
         assert callable(getattr(cards, name)), name
+
+
+def test_lifecycle_card_renders_tools_sessions_denials_spark() -> None:
+    payload = {
+        "available": True,
+        "window_events": 120,
+        "total_events": 200,
+        "tools": [
+            {"tool": "terminal", "allowed": 30, "ok": 68, "error": 2, "denied": 0, "other": 0, "total": 100},
+            {"tool": "patch", "allowed": 10, "ok": 9, "error": 0, "denied": 1, "other": 0, "total": 20},
+        ],
+        "sessions": [{"session_id": "s-123456789", "events": 80, "first_ts": "t0", "last_ts": "t1", "tool_count": 3}],
+        "denials": [{"ts": "2026-08-29T03:00:00+00:00", "tool": "terminal", "session_id": "s-1"}],
+        "histogram": [{"hour": "2026-08-29T02", "events": 40}, {"hour": "2026-08-29T03", "events": 80}],
+        "claim_boundary": "metadata only",
+    }
+    card = cards.lifecycle_card(payload)
+    assert "📡 SIPS Lifecycle" in card
+    assert "`terminal` `100`" in card
+    assert "🔴" in card  # issues + denials
+    assert "s-123456789…" in card[: card.index("Denied")]  # truncated id
+    assert "▆" in card or "█" in card  # sparkline
+    assert "🛡️ metadata only" in card
+
+
+def test_lifecycle_card_unavailable_state() -> None:
+    card = cards.lifecycle_card({"available": False})
+    assert "No hook stream available" in card
+
+
+def test_freshness_card_task_surface_bar() -> None:
+    payload = {
+        "status": "fresh",
+        "checks": {"source": "fresh", "cache": "stale"},
+        "task_exposure": {"present_tools": ["a", "b", "c"], "inventory_complete": True},
+        "tools": ["a", "b", "c"],
+        "claim_boundary": "bounded",
+    }
+    card = cards.freshness_card(payload)
+    assert "🟢 `fresh`" in card
+    assert "`3/3` tools" in card and "█" in card
+    assert "🔴 `cache`" in card
+
+
+def test_audit_card_all_green_and_problems() -> None:
+    good = cards.audit_card({
+        "status": "passed",
+        "runtime_hooks": {"observed_count": 5, "expected_count": 5, "hooks": [{"enabled": True, "trustStatus": "trusted", "currentHash": "h"}] * 5},
+    })
+    assert "🟢 all `5` hooks" in good
+    bad = cards.audit_card({
+        "status": "passed",
+        "runtime_hooks": {
+            "observed_count": 3,
+            "expected_count": 4,
+            "hooks": [
+                {"enabled": False, "trustStatus": "trusted", "currentHash": "h"},
+                {"enabled": True, "trustStatus": "modified", "currentHash": ""},
+                {"enabled": True, "trustStatus": "trusted", "currentHash": "h"},
+            ],
+        },
+    })
+    assert "🟡 `1` disabled" in bad
+    assert "🔴 `1` untrusted" in bad
+    assert "🟡 `1` unhashed" in bad

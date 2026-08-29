@@ -168,9 +168,25 @@ def main():
         return
 
     ranked = rank(records)
-    header = (f"scoped recall: query '{query[:60]}' "
+    emit(build_context(query, ranked))
+
+
+def density_glyph(rec):
+    """Failure → 🔴, success / high-confidence → 🟢, else ⚪."""
+    tags = rec.get("tags") or []
+    conf = rec.get("confidence")
+    if "failure" in tags:
+        return "🔴"
+    if "success" in tags or conf == "high":
+        return "🟢"
+    return "⚪"
+
+
+def build_context(query, ranked):
+    """Render header + record lines (+ truncation) for the injected block."""
+    header = (f"🧠 scoped recall ({len(ranked)} lessons): query '{query[:60]}' "
               f"(advisory — verify before relying on claims).")
-    lines = [header]
+    lines = [header, ""]
 
     for rec in ranked:
         tags = rec.get("tags") or []
@@ -182,12 +198,13 @@ def main():
             marker = "⚠ PRIOR FAILURE  "
         elif "success" in tags or conf == "high":
             marker = "✓ prior success  "
-        lines.append(f"- {marker}[{rec.get('tier','?')}|conf={conf}] {title}: {body}")
+        glyph = density_glyph(rec)
+        lines.append(f"{glyph} - {marker}[{rec.get('tier','?')}|conf={conf}] {title}: {body}")
 
     text = "\n".join(lines)
     if len(text) > MAX_CHARS:
         text = text[:MAX_CHARS] + "\n...(truncated)"
-    emit(text)
+    return text
 
 
 if __name__ == "__main__":
