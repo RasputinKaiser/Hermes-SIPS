@@ -1827,6 +1827,102 @@ function compactBudgets(budgets, usage) {
     .join(' · ')
 }
 
+// --- Run quality -------------------------------------------------------------
+// /runs/{id}/quality (sips.run-quality.v1) is unavailable for runs without a
+// receipt (running/legacy), so both surfaces degrade to a muted reason line.
+// The query key is shared between RunDetail's compact line and RunQualityCard,
+// so one fetch serves both surfaces while a run's detail is expanded.
+function useRunQualityQuery(api, runId) {
+  return useQuery({
+    queryKey: ['sips-control-plane', 'run-quality', runId],
+    queryFn: () => api.rest(`/runs/${encodeURIComponent(runId)}/quality`),
+    enabled: Boolean(runId),
+    staleTime: 15000,
+    refetchInterval: pollInterval(30000)
+  })
+}
+
+function runQualityTone(status) {
+  if (status === 'ok') return 'good'
+  if (status === 'failed') return 'bad'
+  if (status === 'partial') return 'warn'
+  return 'muted'
+}
+
+// 'gates 5/5 ok · impact normal · evidence 3170 items' — null while the fetch
+// has not landed or the run has no quality receipt yet.
+function compactQualityLine(quality) {
+  if (!quality?.available) return null
+  const gates = quality.gates || []
+  const okCount = gates.filter((gate) => gate.status === 'ok').length
+  const evidenceTotal = gates.reduce((sum, gate) => sum + (Number(gate.evidence_total) || 0), 0)
+  const segments = []
+  if (gates.length) segments.push(`gates ${okCount}/${gates.length} ok`)
+  if (quality.impact) segments.push(`impact ${quality.impact}`)
+  if (evidenceTotal > 0) segments.push(`evidence ${compactNumber(evidenceTotal)} items`)
+  return segments.join(' · ')
+}
+
+// Expanded-quality surface inside the run drill-down: per-gate rows with a
+// colored status chip + evidence total (first reason on failed/partial gates),
+// impact/risk/reviewer tag chips, and the token-budget bar (warn at >=90%,
+// TokenUsageCard bar idioms). Fetches via the shared run-quality query key.
+function RunQualityCard({ api, runId }) {
+  const query = useRunQualityQuery(api, runId)
+  if (query.isLoading) {
+    return jsx('div', { style: styles.drillReason, children: 'Reading run quality…' })
+  }
+  const quality = query.data
+  if (query.isError || !quality?.available) {
+    return jsx('div', { style: styles.drillReason, children: query.isError
+      ? `Run quality failed to load: ${query.error?.message || 'unknown error'}`
+      : quality?.reason || 'Run quality is unavailable for this run.' })
+  }
+  const gates = quality.gates || []
+  const budget = quality.budget_usage
+  const charged = Number(budget?.charged_tokens) || 0
+  const limit = Number(budget?.released_token_limit) || 0
+  const budgetShare = limit > 0 ? charged / limit : 0
+  const chips = [
+    ...(quality.impact ? [{ text: quality.impact, title: 'Impact', color: COLORS.accent }] : []),
+    ...(quality.risk_tags || []).map((tag) => ({ text: tag, title: 'Risk tag', color: COLORS.warn })),
+    ...(quality.reviewer_tags || []).map((tag) => ({ text: tag, title: 'Reviewer tag', color: COLORS.muted }))
+  ]
+  return jsxs('div', { style: styles.drillStack, children: [
+    gates.length ? jsxs('div', { style: styles.drillStack, children: [
+      jsx('div', { style: styles.drillLabel, children: 'Gates' }),
+      ...gates.map((gate, index) => jsxs('div', { style: styles.drillStack, children: [
+        jsxs('div', { style: styles.eventRow, children: [
+          jsx('span', { style: styles.label, title: (gate.reasons || []).join('; ') || undefined, children: formatStatus(gate.name) }),
+          jsxs('span', { style: styles.taskMeta, children: [
+            Number(gate.evidence_total) > 0 ? jsx('span', { style: styles.taskAttempts, children: `${compactNumber(Number(gate.evidence_total))} ev` }) : null,
+            jsx('span', { style: { ...styles.taskGateChip, color: COLORS[runQualityTone(gate.status)] }, children: formatStatus(gate.status) })
+          ] })
+        ] }),
+        (gate.status === 'failed' || gate.status === 'partial') && (gate.reasons || []).length ? jsx('div', { style: { ...styles.drillMeta, whiteSpace: 'normal', lineHeight: 1.45, color: gate.status === 'failed' ? COLORS.bad : COLORS.warn }, children: gate.reasons[0] }) : null
+      ] }, `qg-${gate.name || index}`))
+    ] }) : null,
+    chips.length ? jsx('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }, children: chips.map((chip, index) => jsx('span', {
+      title: `${chip.title}: ${chip.text}`,
+      style: { ...styles.taskGateChip, color: chip.color },
+      children: chip.text
+    }, `qc-${index}`)) }) : null,
+    budget ? jsxs('div', { style: styles.drillStack, children: [
+      jsxs('div', { style: styles.eventRow, children: [
+        jsx('span', { style: styles.drillLabel, children: 'Token budget' }),
+        jsx('span', { style: { ...styles.taskAttempts, color: budgetShare >= 0.9 ? COLORS.warn : COLORS.muted }, children: `${compactNumber(charged)} / ${compactNumber(limit)} tok` })
+      ] }),
+      jsx('div', {
+        role: 'img',
+        'aria-label': `Token budget: ${charged} of ${limit} charged`,
+        style: { height: '5px', borderRadius: '999px', background: 'rgba(255,255,255,0.08)', overflow: 'hidden' },
+        children: jsx('div', { style: { height: '100%', width: `${Math.min(100, budgetShare * 100)}%`, borderRadius: '999px', background: budgetShare >= 0.9 ? COLORS.warn : COLORS.accent, opacity: 0.7 } })
+      })
+    ] }) : null,
+    quality.claim_boundary ? jsx('div', { style: styles.drillReason, children: quality.claim_boundary }) : null
+  ] })
+}
+
 // --- Run annotator ----------------------------------------------------------
 // Compact label affordance in the expanded run panel: the newest label shows
 // as a badge next to the status; a one-line input (Enter or Add) POSTs the
@@ -1896,7 +1992,9 @@ function RunDetail({ api, runId }) {
     staleTime: 15000,
     refetchInterval: pollInterval(30000)
   })
+  const qualityQuery = useRunQualityQuery(api, runId)
   const [copiedRunId, setCopiedRunId] = useState(false)
+  const [qualityOpen, setQualityOpen] = useState(false)
   const copyRunId = () => {
     if (!runId || !navigator.clipboard?.writeText) return
     navigator.clipboard.writeText(runId).then(() => {
@@ -1913,6 +2011,7 @@ function RunDetail({ api, runId }) {
     return jsx('div', { style: styles.drillReason, children: detail?.reason || 'Run detail is unavailable.' })
   }
   const budgetsLine = compactBudgets(detail.budgets, detail.budget_usage)
+  const qualityLine = compactQualityLine(qualityQuery.data)
   const tasks = detail.tasks || []
   const taskTokens = tasks.reduce((sum, task) => sum + (Number(task.tokens) || 0), 0)
   const events = (detail.events || []).slice() // chronological; most recent last
@@ -1950,8 +2049,16 @@ function RunDetail({ api, runId }) {
     detail.revision !== undefined ? jsx('div', { style: styles.drillMeta, children: `revision ${detail.revision}` }) : null,
     detail.workspace_root ? jsx('div', { style: styles.drillMeta, title: detail.workspace_root, children: truncateMiddle(detail.workspace_root) }) : null,
     budgetsLine ? jsx('div', { style: styles.drillMeta, children: budgetsLine }) : null,
+    qualityLine ? jsx('div', { style: styles.drillMeta, children: qualityLine }) : null,
     detail.receipt_count > 0 ? jsx('div', { style: styles.drillMeta, children: `${detail.receipt_count} receipt${detail.receipt_count === 1 ? '' : 's'}` }) : null,
     taskTokens > 0 ? jsx('div', { style: styles.drillMeta, children: `${compactNumber(taskTokens)} task tokens` }) : null,
+    jsx(DrillDownRow, {
+      id: `quality-${runId}`,
+      expanded: qualityOpen,
+      onToggle: () => setQualityOpen((value) => !value),
+      detail: jsx(RunQualityCard, { api, runId }),
+      children: jsx('span', { style: styles.drillLabel, children: 'Quality' })
+    }),
     tasks.length ? jsxs('div', { style: styles.drillStack, children: [
       jsx('div', { style: styles.drillLabel, children: 'Tasks' }),
       ...tasks.map((task, index) => jsxs('div', { style: styles.listRow, children: [
