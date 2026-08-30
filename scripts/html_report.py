@@ -562,7 +562,7 @@ def generate_report() -> Path:
 <div class="sub">Generated {generated}<span class="sep">·</span>read-only aggregates from the session store, graph receipts, and the hook stream</div>
 {_render_usage(usage, prev_rows)}
 {_render_runs(matrix, timeline)}
-<div class="foot">{_SEAL}<span>regenerated fresh on every /sips-report run &middot; 18 lens commands in chat &middot; /sips for the full list</span></div>
+<div class="foot">{_SEAL}<span>regenerated fresh on every /sips-report run &middot; /sips for the full command list</span></div>
 </body></html>"""
 
     _REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)

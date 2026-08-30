@@ -230,6 +230,24 @@ def _command_usage(_homebase: Any, raw: str) -> str:
         return "Token usage lens unavailable right now."
 
 
+def _command_report(_homebase: Any, _raw: str) -> str:
+    """Generate the SIPS Control Report HTML and hand the path back for preview."""
+    try:
+        from .scripts.html_report import generate_report
+    except ImportError:
+        from html_report import generate_report  # type: ignore[no-redef]
+    try:
+        path = generate_report()
+        return (
+            f"SIPS Control Report generated.\n\nMEDIA:{path}\n\n"
+            "Open it with the preview controls, or say \"show the SIPS report\" "
+            "to view it inline."
+        )
+    except Exception:
+        logger.debug("SIPS report generation failed", exc_info=True)
+        return "SIPS report generation failed — check the session store is readable."
+
+
 def _command_freshness(homebase: Any, _raw: str) -> str:
     return _card_result(homebase, "homebase_mcp_freshness", {"root": str(_PLUGIN_ROOT)}, _cards.freshness_card)
 
@@ -443,7 +461,7 @@ def _register_skills(ctx: Any) -> None:
 
 def _register_commands(ctx: Any, homebase: Any) -> None:
     direct = {
-        "sips": (lambda raw: "SIPS commands: /sips-status, /sips-routes, /sips-recall, /sips-goal, /sips-verify, /sips-record, /sips-usage, /sips-gates, /sips-quality, /sips-latency, /sips-lifecycle, /sips-freshness, /sips-audit, /selfloop", "Show Hermes SIPS command help", "[help]"),
+        "sips": (lambda raw: "SIPS commands: /sips-status, /sips-routes, /sips-recall, /sips-goal, /sips-verify, /sips-record, /sips-usage, /sips-report, /sips-gates, /sips-quality, /sips-latency, /sips-lifecycle, /sips-freshness, /sips-audit, /selfloop", "Show Hermes SIPS command help", "[help]"),
         "sips-status": (partial(_command_status, homebase), "Inspect SIPS Homebase source status", ""),
         "sips-routes": (partial(_command_routes, homebase), "List SIPS Homebase routes", ""),
         "sips-recall": (partial(_command_recall, homebase), "Search scoped SIPS memory", "<query>"),
@@ -451,6 +469,7 @@ def _register_commands(ctx: Any, homebase: Any) -> None:
         "sips-verify": (partial(_command_verify, homebase), "Verify the vendored SIPS source", "[--tests]"),
         "sips-record": (partial(_command_record, homebase), "Record a bounded SIPS learning", "<title> :: <body>"),
         "sips-usage": (partial(_command_usage, homebase), "Show LLM token usage lens (days 1-30, default 7)", "[days]"),
+        "sips-report": (partial(_command_report, homebase), "Generate the SIPS Control Report (visual HTML dashboard)", ""),
         "sips-gates": (partial(_command_gates, homebase), "Show gate-evidence matrix for recent runs", ""),
         "sips-scan": (partial(_command_context_scan, homebase), "Scan cwd for oversized context risks + bounded reads", "[path]"),
         "sips-distill": (partial(_command_distill, homebase), "Distill bounded excerpts from a file", "<path> :: <query>"),
