@@ -11,6 +11,7 @@ local control-plane dashboard and fails closed to explicit unavailable states.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -650,6 +651,72 @@ def get_tool_latency(window_hours: int = 24) -> dict[str, Any]:
     from tool_latency import tool_latency_payload
 
     return tool_latency_payload(window_hours=window_hours)
+
+
+@router.get("/verdicts")
+def get_verdicts(window_hours: int = 24) -> dict[str, Any]:
+    """Per-tool verdict lens: ok | slow | stalled | denied (read-only)."""
+    from tool_latency import verdicts_payload
+
+    return verdicts_payload(window_hours=window_hours)
+
+
+@router.get("/report-status")
+def get_report_status() -> dict[str, Any]:
+    """Newest SIPS HTML report metadata, without generating one (read-only).
+
+    Backs the panel's ReportStatusCard: tells the panel whether a control
+    report exists, how fresh it is, and where to regenerate it (/sips-report
+    in chat). The report file itself is never read or served here.
+    """
+    path = _report_path()
+    claim_boundary = "Reflects the newest generated SIPS HTML report only; contents are never read here."
+    if not path.exists():
+        return {
+            "available": False,
+            "generated_at": None,
+            "age_hours": None,
+            "path": None,
+            "posture": None,
+            "note": "No report generated yet. Run /sips-report in chat.",
+            "claim_boundary": claim_boundary,
+        }
+    try:
+        stat = path.stat()
+        age_hours = max(0.0, (time.time() - stat.st_mtime) / 3600.0)
+        generated_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
+    except OSError:
+        return {
+            "available": False,
+            "generated_at": None,
+            "age_hours": None,
+            "path": None,
+            "posture": None,
+            "note": "Report file exists but is not readable right now.",
+            "claim_boundary": claim_boundary,
+        }
+    return {
+        "available": True,
+        "generated_at": generated_at,
+        "age_hours": round(age_hours, 2),
+        "path": str(path),
+        "posture": None,
+        "note": None,
+        "claim_boundary": claim_boundary,
+    }
+
+
+def _report_path() -> Path:
+    """Resolve the newest SIPS report location (monkeypatch seam for tests)."""
+    try:
+        from html_report import _REPORT_PATH
+
+        return Path(_REPORT_PATH)
+    except Exception:
+        sips_home = os.environ.get("SIPS_HOME")
+        if sips_home:
+            return Path(sips_home) / "report.html"
+        return Path.home() / ".hermes" / "sips" / "report.html"
 
 
 @router.get("/goal-board")
