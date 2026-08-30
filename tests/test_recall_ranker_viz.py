@@ -29,7 +29,8 @@ def test_glyph_starts_each_record_line():
     lines = [ln for ln in text.split("\n") if ln.startswith(tuple(GLYPHS))]
     assert len(lines) == 3, text
     for ln in lines:
-        assert ln.split(" - ", 1)[0] in GLYPHS, ln
+        # glyph, then the tier icon, then ' - ' separates prefix from body
+        assert ln.split(" - ", 1)[0] in {f"{g} {i}" for g in GLYPHS for i in ("📘", "🛠", "📚", "📌")}, ln
 
 
 def test_failure_glyph_and_ordering_before_success():
@@ -42,9 +43,9 @@ def test_failure_glyph_and_ordering_before_success():
     fail_idx = text.index("🔴")
     succ_idx = text.index("🟢")
     assert fail_idx < succ_idx
-    # markers stay verbatim after the glyph
-    assert f"🔴 - {FAILURE}  [" in text
-    assert f"🟢 - {SUCCESS}  [" in text
+    # markers stay verbatim after the glyph + tier icon
+    assert f"🔴 📘 - {FAILURE}  [" in text
+    assert f"🟢 📘 - {SUCCESS}  [" in text
 
 
 def test_neutral_records_get_white_glyph():

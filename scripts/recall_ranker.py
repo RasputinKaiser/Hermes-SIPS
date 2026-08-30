@@ -183,10 +183,23 @@ def density_glyph(rec):
 
 
 def build_context(query, ranked):
-    """Render header + record lines (+ truncation) for the injected block."""
+    """Render header + record lines (+ truncation) for the injected block.
+
+    Rich formatting: per-tier icons, source-provenance suffix (session link
+    or evidence path basename) so a lesson can be traced without a follow-up
+    search, and freshness age. Stays bounded by MAX_CHARS.
+    """
     header = (f"🧠 scoped recall ({len(ranked)} lessons): query '{query[:60]}' "
               f"(advisory — verify before relying on claims).")
     lines = [header, ""]
+
+    tier_icons = {
+        "learning": "📘",
+        "work": "🛠",
+        "knowledge": "📚",
+        "state": "📌",
+    }
+    now = datetime.now(timezone.utc)
 
     for rec in ranked:
         tags = rec.get("tags") or []
@@ -199,7 +212,34 @@ def build_context(query, ranked):
         elif "success" in tags or conf == "high":
             marker = "✓ prior success  "
         glyph = density_glyph(rec)
-        lines.append(f"{glyph} - {marker}[{rec.get('tier','?')}|conf={conf}] {title}: {body}")
+        tier_icon = tier_icons.get(rec.get("tier"), "•")
+
+        # Provenance hint: source_backed runs link the originating session;
+        # other provenance types show a compact evidence filename.
+        prov = rec.get("provenance") if isinstance(rec.get("provenance"), dict) else {}
+        prov_bits = []
+        session_id = prov.get("session_id")
+        if session_id:
+            prov_bits.append(f"@session:{str(session_id)[:22]}")
+        evidence_path = str(prov.get("evidence_path") or "")
+        if evidence_path:
+            prov_bits.append(evidence_path.rsplit("/", 1)[-1][:28])
+
+        # Freshness age (records carry ISO created_at).
+        created = rec.get("created_at") or ""
+        age = ""
+        if created:
+            try:
+                created_dt = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+                age_days = (now - created_dt).days
+                age = f" · {age_days}d" if age_days else " · today"
+            except ValueError:
+                pass
+
+        suffix = f" ({' · '.join(prov_bits)})" if prov_bits else ""
+        lines.append(
+            f"{glyph} {tier_icon} - {marker}[{rec.get('tier','?')}|conf={conf}]{age} {title}: {body}{suffix}"
+        )
 
     text = "\n".join(lines)
     if len(text) > MAX_CHARS:
