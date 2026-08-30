@@ -66,7 +66,8 @@ th { color: var(--dim); font-size: 10px; text-transform: uppercase; letter-spaci
 td.r, th.r { text-align: right; }
 .bar-wrap { background: #20242e; border-radius: 99px; height: 6px; overflow: hidden; min-width: 90px; }
 .bar { height: 100%; border-radius: 99px; background: var(--accent); opacity: .85;
-  transition: width .5s cubic-bezier(.2,.7,.3,1); }
+  transform-origin: left center; animation: grow .7s cubic-bezier(.16,1,.3,1) both; }
+@keyframes grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 .bar.g { background: var(--good); } .bar.w { background: var(--warn); } .bar.b { background: var(--bad); }
 .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12px; }
 .ellip { display: inline-block; max-width: 240px; overflow: hidden; text-overflow: ellipsis;
@@ -81,6 +82,17 @@ td.r, th.r { text-align: right; }
   padding-top: 14px; display: flex; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
 .seal { display: inline-flex; align-items: center; gap: 7px; color: var(--mut); }
 .seal svg { flex-shrink: 0; }
+/* Animate pass: sections fade up once, staggered; bars grow from left.
+   All of it collapses under prefers-reduced-motion. */
+section { animation: rise .45s cubic-bezier(.16,1,.3,1) both; }
+section:nth-of-type(2) { animation-delay: .08s; }
+section:nth-of-type(3) { animation-delay: .16s; }
+section:nth-of-type(4) { animation-delay: .24s; }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  section { animation: none; }
+  .bar { animation: none; }
+}
 """
 
 
@@ -137,9 +149,9 @@ def _posture(usage: dict[str, Any], matrix: dict[str, Any]) -> str:
 def _render_usage(usage: dict[str, Any]) -> str:
     if not usage.get("available"):
         return """
-<h2>Token usage</h2>
+<section><h2>Token usage</h2>
 <div class="stat"><div class="v dim">&mdash;</div>
-<div class="l">unavailable</div><div class="d">session store not readable from this run</div></div>"""
+<div class="l">unavailable</div><div class="d">session store not readable from this run</div></div></section>"""
     t = usage.get("totals") or {}
     hit = t.get("cache_hit_pct")
     hit_cls = "good" if (hit or 0) >= 90 else "warn"
@@ -154,7 +166,7 @@ def _render_usage(usage: dict[str, Any]) -> str:
         daily_rows += (
             f"<tr><td class='mono dim'>{_esc(d.get('day'))}</td>"
             f"<td class='r'>{_fmt(d.get('fresh_input_tokens'))}</td>"
-            f"<td class='r {hit_cls if day_hit == hit else ''}'>{day_hit}%</td>"
+            f"<td class='r'>{day_hit}%</td>"
             f"<td style='width:34%'>{_bar(100.0 * (d.get('fresh_input_tokens') or 0) / peak, cls)}</td></tr>"
         )
 
@@ -173,27 +185,42 @@ def _render_usage(usage: dict[str, Any]) -> str:
     direct = (split.get("direct") or {}).get("fresh_input_tokens") or 0
     share = round(100 * sub / (sub + direct)) if (sub + direct) else 0
 
-    daily_block = f"""
-<div><h3 style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.09em;margin:12px 0 4px;">Fresh input / day</h3>
-<table>{daily_rows}</table></div>""" if daily_rows else ""
-    replay_block = f"""
-<div><h3 style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.09em;margin:12px 0 4px;">Replay leaders</h3>
+    daily_block = (
+        f"""<div><h3 style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.09em;margin:12px 0 4px;">New tokens per day</h3>
+<table>{daily_rows}</table></div>"""
+        if daily_rows
+        else ""
+    )
+    replay_block = (
+        f"""<div><h3 style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.09em;margin:12px 0 4px;">Most reread tools</h3>
 <table>{replay_rows}</table>
-<p style="margin-top:12px;font-size:12px;color:var(--mut);">Subagent share of fresh input
+<p style="margin-top:12px;font-size:12px;color:var(--mut);">Share of new tokens spent on subagents
 <b class="accent">{share}%</b> <span class="dim">({_fmt(sub)} / {_fmt(sub + direct)})</span></p>
-</div>""" if replay_rows else ""
+</div>"""
+        if replay_rows
+        else ""
+    )
     inner = daily_block + replay_block
     two = f'<div class="two">{inner}</div>' if inner else ""
 
     return f"""
-<h2>Token usage · {usage.get('window_days', 7)}d</h2>
+<section><h2>Token usage &middot; last {usage.get('window_days', 7)} days</h2>
 <div class="grid">
-  <div class="stat"><div class="v">{_fmt(t.get('fresh_input_tokens'))}</div><div class="l">fresh input</div></div>
-  <div class="stat"><div class="v {hit_cls}">{hit}%</div><div class="l">cache hit</div><div class="d">of {_fmt(t.get('total_input_tokens'))} total</div></div>
-  <div class="stat"><div class="v">{_fmt(t.get('output_tokens'))}</div><div class="l">output</div><div class="d">ratio {t.get('fresh_to_output_ratio')}</div></div>
-  <div class="stat"><div class="v">{_fmt(replay)}</div><div class="l">replayed (tools)</div></div>
+  <div class="stat"><div class="v">{_fmt(t.get('fresh_input_tokens'))}</div><div class="l">new tokens sent</div></div>
+  <div class="stat"><div class="v {hit_cls}">{hit}%</div><div class="l">served from cache</div><div class="d">of {_fmt(t.get('total_input_tokens'))} total</div></div>
+  <div class="stat"><div class="v">{_fmt(t.get('output_tokens'))}</div><div class="l">tokens written back</div><div class="d">ratio {t.get('fresh_to_output_ratio')} to new input</div></div>
+  <div class="stat"><div class="v">{_fmt(replay)}</div><div class="l">reread tool results</div></div>
   <div class="stat"><div class="v">{t.get('sessions', 0)}</div><div class="l">sessions</div></div>
-</div>{two}"""
+</div>{two}</section>"""
+
+
+_GATE_LABELS = {
+    "integrity": "Integrity",
+    "correctness": "Correct",
+    "regression": "No regressions",
+    "resource": "Resources",
+    "benefit": "Benefit",
+}
 
 
 def _render_gates(matrix: dict[str, Any]) -> str:
@@ -203,10 +230,13 @@ def _render_gates(matrix: dict[str, Any]) -> str:
     runs = matrix.get("runs") or []
     if not runs:
         return """
-<h2>Gate matrix</h2>
+<h2>Quality gates per run</h2>
 <div class="stat"><div class="v dim">&mdash;</div><div class="l">no gated runs yet</div>
 <div class="d">the matrix fills as sessions land graph receipts</div></div>"""
-    head = "".join(f'<th class="r">{_esc(g[:4].upper())}</th>' for g in gate_names)
+    head = "".join(
+        f'<th class="r" title="{_esc(_GATE_LABELS.get(g, g))}">{_esc(_GATE_LABELS.get(g, g))}</th>'
+        for g in gate_names
+    )
     body = ""
     for run in runs[:12]:
         gates = run.get("gates") or {}
@@ -221,11 +251,11 @@ def _render_gates(matrix: dict[str, Any]) -> str:
     gated = sum(1 for r in runs if r.get("receipt"))
     all_ok = sum(1 for r in runs if r.get("receipt") and not r.get("failed_count"))
     return f"""
-<h2>Gate matrix</h2>
+<h2>Quality gates per run</h2>
 <table><tr><th>run</th>{head}</tr>{body}</table>
-<p style="margin-top:10px;font-size:12px;color:var(--mut);">{gated}/{len(runs)} gated &middot;
-<b class="{ 'good' if all_ok == gated and gated else 'warn' }">{all_ok} clean</b>
-<span class="dim">&middot; cell = strongest gate outcome, from graph receipts</span></p>"""
+<p style="margin-top:10px;font-size:12px;color:var(--mut);">{gated}/{len(runs)} runs verified &middot;
+<b class="{ 'good' if all_ok == gated and gated else 'warn' }">{all_ok} passed all gates</b>
+<span class="dim">&middot; each dot = did that quality check pass for the run, from its receipt</span></p>"""
 
 
 def _render_timeline(timeline: dict[str, Any]) -> str:
@@ -253,8 +283,8 @@ def _render_timeline(timeline: dict[str, Any]) -> str:
             f"<td class='r' style='color:var(--mut)'>{delta_h:.1f}h ago</td></tr>"
         )
     return f"""
-<h2>Timeline &middot; ~{timeline.get('window_hours', '?')}h window</h2>
-<table>{rows}</table>"""
+<section><h2>Recent activity &middot; last {timeline.get('window_hours', '?')} hours</h2>
+<table>{rows}</table></section>"""
 
 
 def generate_report() -> Path:

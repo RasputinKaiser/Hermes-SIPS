@@ -46,7 +46,8 @@ def test_render_gates_cells_and_summary():
         ],
     }
     html = html_report._render_gates(matrix)
-    assert "<b class=\"good\">1 clean</b>" in html and "not gated" in html
+    assert "<b class=\"good\">1 passed all gates</b>" in html and "not gated" in html
+    assert 'title="Integrity"' in html  # jargon-free column labels
 
 
 def test_generate_report_writes_file(tmp_path, monkeypatch):
