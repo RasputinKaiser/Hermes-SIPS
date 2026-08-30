@@ -38,8 +38,8 @@ _COLD_DAY_FRESH = 100_000
 
 _CSS = """
 :root { color-scheme: dark; --bg:#0f1117; --panel:#171a22;
-        --panel3:#20242e; --line:#242a36; --ink:#dfe2ea; --mut:#8b91a0;
-        --dim:#7d8394; --neutral:#39404e;
+        --panel3:#20242e; --track:#2b3140; --line:#242a36; --ink:#dfe2ea; --mut:#8b91a0;
+        --dim:#7d8394; --neutral:#4d5566;
         --accent:#7dd3fc; --good:#69d39a; --warn:#f4c76b; --bad:#f28b8b; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { background: var(--bg); color: var(--ink);
@@ -61,7 +61,7 @@ h2 { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacin
   color: var(--dim); margin: 38px 0 14px; display: flex; align-items: center; gap: 10px; }
 h2::before { content: ''; width: 14px; height: 2px; background: var(--accent); border-radius: 2px; flex-shrink: 0; }
 h2::after { content: ''; flex: 1; height: 1px; background: var(--line); }
-.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 10px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(136px, 1fr)); gap: 10px; }
 .grid > .stat { min-width: 0; }
 .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px;
   transition: border-color .15s ease; }
@@ -76,20 +76,20 @@ tbody tr { transition: background .12s ease; }
 tbody tr:hover { background: color-mix(in srgb, var(--accent) 4%, transparent); }
 tbody tr:last-child td { border-bottom: 0; }
 th.c, td.c { text-align: center; }
-th.c { width: 72px; white-space: nowrap; }
+th.c { width: 64px; white-space: nowrap; }
 td.c .dot { margin-right: 0; }
 .scroll-x { overflow-x: auto; }
 th { color: var(--dim); font-size: 10px; text-transform: uppercase; letter-spacing: 0.09em;
   border-bottom-color: var(--line); white-space: nowrap; }
 td.r, th.r { text-align: right; }
-.bar-wrap { background: var(--panel3); border-radius: 99px; height: 6px; overflow: hidden; min-width: 90px; }
+.bar-wrap { background: var(--track); border-radius: 99px; height: 6px; overflow: hidden; min-width: 90px; }
 .bar { height: 100%; border-radius: 99px; background: var(--accent); opacity: .85;
   transform-origin: left center; animation: grow .7s cubic-bezier(.16,1,.3,1) both; }
 @keyframes grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 .bar.n { background: var(--neutral); }
 .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12px; }
 td.mono { white-space: nowrap; }
-.ellip { display: inline-block; max-width: 240px; overflow: hidden; text-overflow: ellipsis;
+.ellip { display: inline-block; max-width: 190px; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; vertical-align: bottom; }
 @media (max-width: 560px) { .ellip { max-width: 150px; } }
 .dim { color: var(--dim); }
@@ -99,6 +99,27 @@ td.mono { white-space: nowrap; }
 .legend { margin-top: 10px; font-size: 12px; color: var(--mut); }
 .delta { margin-top: 10px; font-size: 12px; color: var(--mut); }
 .panel-h { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .09em; margin: 12px 0 4px; }
+.chip { display: inline-block; margin-left: 6px; font-size: 9px; font-weight: 700;
+  font-variant-numeric: tabular-nums; padding: 1px 6px; border-radius: 99px;
+  vertical-align: 2px; white-space: nowrap; }
+.chip.up { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); }
+.chip.down { color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); }
+.chip.flat { color: var(--dim); background: color-mix(in srgb, var(--dim) 14%, transparent); }
+.swatches { display: flex; gap: 14px; align-items: center; margin-top: 8px;
+  font-size: 11px; color: var(--mut); flex-wrap: wrap; }
+.swatches b { font-weight: 600; color: var(--ink); }
+.sw { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+.callout { margin-top: 14px; border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line));
+  background: color-mix(in srgb, var(--accent) 5%, transparent); border-radius: 10px;
+  padding: 12px 14px; font-size: 13px; }
+.callout .co-t { font-size: 10px; text-transform: uppercase; letter-spacing: .09em;
+  color: var(--dim); margin-bottom: 6px; }
+.callout ul { margin: 0; padding-left: 16px; }
+.callout li { margin: 3px 0; }
+.tag { display: inline-block; font-size: 10px; color: var(--mut);
+  border: 1px solid var(--line); border-radius: 99px; padding: 1px 7px;
+  margin-left: 8px; vertical-align: 1px; white-space: nowrap; }
+.axis { margin-top: 6px; font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 36px; }
 @media (max-width: 760px) { .two { grid-template-columns: 1fr; } body { padding: 24px 18px 40px; } }
 .foot { margin-top: 44px; color: var(--dim); font-size: 11px; border-top: 1px solid var(--line);
@@ -149,8 +170,42 @@ def _today() -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
 
-def _bar(pct: float, cls: str = "") -> str:
-    return f'<div class="bar-wrap"><div class="bar {cls}" style="width:{max(1, min(100, round(pct)))}%"></div></div>'
+def _bar(pct: float, cls: str = "", title: str = "") -> str:
+    t = f" title='{_esc(title)}'" if title else ""
+    return f'<div class="bar-wrap"{t}><div class="bar {cls}" style="width:{max(1, min(100, round(pct)))}%"></div></div>'
+
+
+def _chip(this: Any, prev: Any, *, lower_is_better: bool | None = True) -> str:
+    """Week-over-week delta chip. lower_is_better=None → neutral direction."""
+    try:
+        this_v, prev_v = float(this or 0), float(prev or 0)
+    except (TypeError, ValueError):
+        return ""
+    if not prev_v:
+        return ""
+    pct = 100.0 * (this_v - prev_v) / prev_v
+    if abs(pct) < 2:
+        cls, arrow = "flat", "&rarr;"
+    elif lower_is_better is None:
+        cls, arrow = "flat", ("&uarr;" if pct > 0 else "&darr;")
+    elif (pct < 0) == lower_is_better:
+        cls, arrow = "down", "&darr;"
+    else:
+        cls, arrow = "up", "&uarr;"
+    return f"<span class='chip {cls}' title='vs previous week'>{arrow} {abs(pct):.0f}%</span>"
+
+
+def _recency(ts: float, newest: float) -> str:
+    """Human relative time with the absolute UTC timestamp on hover."""
+    delta_h = max(0.0, (newest - ts) / 3600)
+    if delta_h < 0.02:
+        txt = "just now"
+    elif delta_h < 1:
+        txt = f"{int(delta_h * 60)}m ago"
+    else:
+        txt = f"{delta_h:.1f}h ago"
+    abs_txt = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%b %d %H:%M UTC")
+    return f"<span class='dim' title='{abs_txt}'>{txt}</span>"
 
 
 def _dot(cls: str, label: str) -> str:
@@ -198,10 +253,22 @@ def _posture(usage: dict[str, Any], matrix: dict[str, Any]) -> str:
         and d["cache_hit_pct"] < 80
     ]
     if dirty or weak_days or (hit is not None and hit < 80):
-        return '<span class="posture warn">Needs attention</span>'
+        why = []
+        if dirty:
+            why.append(f"{sum(r.get('failed_count') or 0 for r in dirty)} failed gate checks")
+        if weak_days:
+            worst = min(d["cache_hit_pct"] for d in weak_days)
+            why.append(f"cache hit fell to {worst}% on {len(weak_days)} day(s)")
+        if hit is not None and hit < 80:
+            why.append(f"week cache hit {hit}%")
+        why_txt = " &middot; ".join(why).replace("&", "&amp;")
+        return ('<span class="posture warn" title="Worst-signal-wins: ' + why_txt
+                + '">Needs attention</span>')
     if hit is not None and hit >= 90:
-        return '<span class="posture good">All healthy</span>'
-    return '<span class="posture">Operational</span>'
+        return ('<span class="posture good" title="No failed gate checks; all full days '
+                f'above 80% cache hit (week {hit}%)">'
+                'All healthy</span>')
+    return '<span class="posture" title="No failed gates, but no strong health signal either">Operational</span>'
 
 
 def _week_agg(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -242,10 +309,18 @@ def _render_usage(usage: dict[str, Any], prev_rows: list[dict[str, Any]] | None 
     hit_cls = _hit_cls(hit)
     replay = (usage.get("replay") or {}).get("tool_results_replayed_tokens_est") or 0
     today = _today()
+    prev_agg = _week_agg(prev_rows) if prev_rows else None
+    this_agg = _week_agg((usage.get("daily") or [])[-7:])
+
+    def _c(key: str, *, lower_is_better: bool | None = True) -> str:
+        if not prev_agg:
+            return ""
+        return _chip(this_agg.get(key), prev_agg.get(key), lower_is_better=lower_is_better)
 
     daily_rows = ""
     days = (usage.get("daily") or [])[-10:]
     peak = max((d.get("fresh_input_tokens") or 0 for d in days), default=1) or 1
+    peak_f = _fmt(peak)
     for d in days:
         day = d.get("day") or ""
         partial = day == today
@@ -260,17 +335,31 @@ def _render_usage(usage: dict[str, Any], prev_rows: list[dict[str, Any]] | None 
             pct_txt = f"{day_hit}%" if day_hit is not None else "&mdash;"
             pct_cls, bar_cls = _hit_cls(day_hit), ""
             label = _esc(day)
+        fresh_v = d.get("fresh_input_tokens") or 0
         daily_rows += (
             f"<tr><td class='mono dim'>{label}</td>"
-            f"<td class='r'>{_fmt(d.get('fresh_input_tokens'))}</td>"
+            f"<td class='r'>{_fmt(fresh_v)}</td>"
             f"<td class='r {pct_cls}'>{pct_txt}</td>"
-            f"<td style='width:34%'>{_bar(100.0 * (d.get('fresh_input_tokens') or 0) / peak, bar_cls)}</td></tr>"
+            f"<td style='width:34%'>{_bar(100.0 * fresh_v / peak, bar_cls, title=_fmt(fresh_v) + ' new tokens')}</td></tr>"
         )
     daily_block = ""
     if daily_rows:
+        swatches = (
+            "<div class='swatches'>"
+            "<span><span class='sw' with_bg></span><b>&ge;90</b> healthy</span>"
+            "<span><span class='sw' amber_bg></span><b>80&ndash;90</b> watch</span>"
+            "<span><span class='sw' red_bg></span><b>&lt;80</b> regress</span>"
+            "<span><span class='sw' gray_bg></span>partial day</span>"
+            "</div>"
+        )
+        swatches = (swatches
+            .replace("with_bg", "style='background:var(--good)'")
+            .replace("amber_bg", "style='background:var(--warn)'")
+            .replace("red_bg", "style='background:var(--bad)'")
+            .replace("gray_bg", "style='background:var(--neutral)'"))
         daily_block = f"""<div><h3 class="panel-h">New tokens per day</h3>
 <table><tr><th>day</th><th class="r">new tokens</th><th class="r">served from cache</th><th title="Bar length = share of the week's largest day">volume</th></tr>{daily_rows}</table>
-<p class="legend">bar length = new tokens sent &middot; cache % colored green &ge;90, amber 80&ndash;90, red &lt;80 &middot; today renders partial (gray) until the day closes</p></div>"""
+<p class="axis">bar length = new tokens sent &middot; full bar = {peak_f} (week peak)</p>{swatches}</div>"""
 
     replay_rows = ""
     tools = (usage.get("replay") or {}).get("top_tools", [])
@@ -279,7 +368,7 @@ def _render_usage(usage: dict[str, Any], prev_rows: list[dict[str, Any]] | None 
         replay_rows += (
             f"<tr><td class='mono'>{_esc(r['tool'])}</td>"
             f"<td class='r'>&asymp;{_fmt(r.get('replayed_tokens_est'))}</td>"
-            f"<td style='width:38%'>{_bar(100.0 * (r.get('replayed_tokens_est') or 0) / rpeak)}</td></tr>"
+            f"<td style='width:38%'>{_bar(100.0 * (r.get('replayed_tokens_est') or 0) / rpeak, title=_fmt(r.get('replayed_tokens_est')) + ' reread tokens')}</td></tr>"
         )
 
     split = usage.get("direct_vs_subagent") or {}
@@ -287,33 +376,46 @@ def _render_usage(usage: dict[str, Any], prev_rows: list[dict[str, Any]] | None 
     direct = (split.get("direct") or {}).get("fresh_input_tokens") or 0
     share = round(100 * sub / (sub + direct)) if (sub + direct) else 0
 
+    callout_bits = []
+    if tools:
+        top = tools[0]
+        callout_bits.append(
+            f"<li><b>Cheapest lever:</b> cap {_esc(top['tool'])}'s output size &mdash; "
+            f"&asymp;{_fmt(top.get('replayed_tokens_est'))} re-read every turn.</li>"
+        )
+    callout_bits.append(
+        f"<li>Subagents used <b class='accent'>{share}%</b> of new tokens "
+        f"({_fmt(sub)} / {_fmt(sub + direct)}){' &mdash; over half; trim briefs' if share >= 50 else ''}.</li>"
+    )
+    cost = t.get("estimated_cost_usd")
+    if cost:
+        cost_bits = f"${cost:,.2f} this week"
+        if hit:
+            saved = cost * (100 - hit) / max(hit, 1)
+            if saved > 0.5:
+                cost_bits += f" &middot; cache carried {100 - hit:.1f}% of input &mdash; roughly <b class='good'>${saved:,.2f}</b> avoided"
+        callout_bits.append(f"<li>Estimated spend: {cost_bits}.</li>")
+    callout_block = f"""<div class="callout"><div class="co-t">What to do with this</div><ul>{''.join(callout_bits)}</ul></div>"""
+
     replay_block = ""
     if replay_rows:
-        top_tool = _esc(tools[0]["tool"]) if tools else ""
-        lever = (
-            f"Reread tool results are re-sent on every turn &mdash; capping {top_tool}'s output size is the cheapest lever. "
-            if top_tool
-            else ""
-        )
-        sub_note = " &mdash; over half; trim subagent briefs" if share >= 50 else ""
         replay_block = f"""<div><h3 class="panel-h">Most reread tools</h3>
 <table>{replay_rows}</table>
-<p class="legend">{lever}Share of new tokens spent on subagents <b class="accent">{share}%</b> <span class="dim">({_fmt(sub)} / {_fmt(sub + direct)}{sub_note})</span></p></div>"""
+<p class="legend">reread results are re-sent on every turn &mdash; each replay is context you pay for twice</p></div>"""
 
     inner = daily_block + replay_block
     two = f'<div class="two">{inner}</div>' if inner else ""
     delta = _delta_line((usage.get("daily") or [])[-7:], prev_rows or [])
 
-    replay_top = _fmt(tools[0].get("replayed_tokens_est")) if tools else None
     return f"""
 <section><h2>Token usage &middot; last {usage.get('window_days', 7)} days</h2>
 <div class="grid">
-  <div class="stat"><div class="v">{_fmt(t.get('fresh_input_tokens'))}</div><div class="l">new tokens sent</div><div class="d">of {_fmt(t.get('total_input_tokens'))} total read incl. cache</div></div>
+  <div class="stat"><div class="v">{_fmt(t.get('fresh_input_tokens'))}{_c('fresh')}</div><div class="l">new tokens sent</div><div class="d">of {_fmt(t.get('total_input_tokens'))} total read incl. cache</div></div>
   <div class="stat"><div class="v {hit_cls}">{hit}%</div><div class="l">served from cache</div><div class="d">green&nbsp;&ge;90, amber&nbsp;80&ndash;90, red&nbsp;&lt;80</div></div>
-  <div class="stat"><div class="v">{_fmt(t.get('output_tokens'))}</div><div class="l">tokens written back</div><div class="d">&asymp;{_esc(t.get('fresh_to_output_ratio') or '?')} new tokens read per token written back</div></div>
-  <div class="stat"><div class="v">{_fmt(replay)}</div><div class="l">reread tool results</div><div class="d">{('&asymp;' + replay_top + ' from ' + _esc(tools[0]['tool']) + ' alone') if replay_top else '&mdash;'}</div></div>
-  <div class="stat"><div class="v">{t.get('sessions', 0)}</div><div class="l">sessions</div><div class="d">across {_fmt(t.get('api_calls'))} API calls</div></div>
-</div>{delta}{two}</section>"""
+  <div class="stat"><div class="v">{_fmt(t.get('output_tokens'))}{_c('out')}</div><div class="l">tokens written back</div><div class="d">&asymp;{_esc(t.get('fresh_to_output_ratio') or '?')} new tokens read per token written back</div></div>
+  <div class="stat"><div class="v">{_fmt(replay)}</div><div class="l">reread tool results</div><div class="d">re-sent context &mdash; see levers below</div></div>
+  <div class="stat"><div class="v">{t.get('sessions', 0)}{_c('sessions', lower_is_better=None)}</div><div class="l">sessions</div><div class="d">across {_fmt(t.get('api_calls'))} API calls</div></div>
+</div>{delta}{two}{callout_block}</section>"""
 
 
 _GATE_LABELS = {
@@ -373,20 +475,19 @@ def _render_runs(matrix: dict[str, Any], timeline: dict[str, Any]) -> str:
         seen.add(rid)
         e = tmap.get(rid)
         if e is not None:
-            delta_h = max(0.0, (newest - e["ts"]) / 3600)
-            recency = f"{delta_h:.1f}h ago"
+            recency = _recency(e["ts"], newest)
             st = e.get("status")
             icon = {"succeeded": "g", "failed": "b", "stale": "w"}.get(st, "n")
         else:
             recency = "&mdash;"
             st = "verified" if run.get("receipt") else "not gated"
             icon = "g" if run.get("receipt") else "n"
-        note = " <span class='dim' style='font-size:11px'>&middot; not gated</span>" if not run.get("receipt") else ""
+        note = " <span class='tag'>not gated</span>" if not run.get("receipt") else ""
         rows += (
             f"<tr><td class='mono'><span class='ellip' title='{_esc(rid)}'>{_esc(rid[:26])}&hellip;</span>{note}</td>"
             f"<td>{_dot(icon, f'{rid}: {st}')}{_esc(st)}</td>"
             f"{_gate_cells(run, gate_names, rid)}"
-            f"<td class='r dim'>{recency}</td></tr>"
+            f"<td class='r'>{recency}</td></tr>"
         )
     # Runs seen in the activity stream but absent from the gate matrix.
     for e in entries:
@@ -394,15 +495,14 @@ def _render_runs(matrix: dict[str, Any], timeline: dict[str, Any]) -> str:
         if rid in seen or rows.count("<tr>") >= 14:
             continue
         seen.add(rid)
-        delta_h = max(0.0, (newest - e["ts"]) / 3600)
         st = e.get("status")
         icon = {"succeeded": "g", "failed": "b", "stale": "w"}.get(st, "n")
         rows += (
             f"<tr><td class='mono'><span class='ellip' title='{_esc(rid)}'>{_esc(rid[:26])}&hellip;</span>"
-            f"<span class='dim' style='font-size:11px'>&middot; not gated</span></td>"
+            f"<span class='tag'>not gated</span></td>"
             f"<td>{_dot(icon, f'{rid}: {st}')}{_esc(st)}</td>"
             f"{_gate_cells({}, gate_names, rid)}"
-            f"<td class='r dim'>{delta_h:.1f}h ago</td></tr>"
+            f"<td class='r'>{_recency(e['ts'], newest)}</td></tr>"
         )
 
     gated = sum(1 for r in runs if r.get("receipt"))
@@ -422,7 +522,9 @@ def _render_runs(matrix: dict[str, Any], timeline: dict[str, Any]) -> str:
             f"({_esc(c.get('children', 0))} children, {delta_h:.1f}h ago)"
         )
     campaign_note = (
-        f"<p class='legend'>Campaigns: {' &middot; '.join(campaign_bits)}</p>" if campaign_bits else ""
+        f"<h3 class='panel-h'>Campaigns</h3><p class='legend'>{' &middot; '.join(campaign_bits)}</p>"
+        if campaign_bits
+        else ""
     )
 
     return f"""
@@ -460,7 +562,7 @@ def generate_report() -> Path:
 <div class="sub">Generated {generated}<span class="sep">·</span>read-only aggregates from the session store, graph receipts, and the hook stream</div>
 {_render_usage(usage, prev_rows)}
 {_render_runs(matrix, timeline)}
-<div class="foot">{_SEAL}<span>18 lens commands in chat &middot; /sips for the full list</span></div>
+<div class="foot">{_SEAL}<span>regenerated fresh on every /sips-report run &middot; 18 lens commands in chat &middot; /sips for the full list</span></div>
 </body></html>"""
 
     _REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
