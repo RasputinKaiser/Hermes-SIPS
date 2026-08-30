@@ -3318,6 +3318,59 @@ function VerdictsCard({ api }) {
   })
 }
 
+// Control-report status: surfaces GET /report-status freshness and hands the
+// user a one-click path back to the report command. 'Open in chat' routes
+// through the host bridge when present, otherwise falls back to copying the
+// command with a short 'Copied' flash (same idiom as the RoutesCard fallback).
+function ReportStatusCard({ api }) {
+  const query = useQuery({ queryKey: ['sips', 'report-status'], queryFn: () => api.rest('/report-status'), refetchInterval: pollInterval(60000) })
+  const [copied, setCopied] = useState(false)
+  const title = 'Report status'
+  const icon = 'window'
+
+  const openInChat = () => {
+    if (window.hermes && typeof window.hermes.send === 'function') {
+      window.hermes.send('/sips-report')
+      return
+    }
+    if (!navigator.clipboard?.writeText) return
+    navigator.clipboard.writeText('/sips-report').then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    }).catch(() => { /* clipboard unavailable — button still shows the command */ })
+  }
+
+  if (query.isLoading) {
+    return jsx(Card, { title, icon, children: jsx('div', { style: styles.unavailable, children: 'Checking report status…' }) })
+  }
+  if (query.isError) {
+    return jsx(Card, {
+      title,
+      icon,
+      children: jsx('div', { style: styles.unavailable, children: 'The report-status endpoint is unavailable right now. Retry from the header refresh.' })
+    })
+  }
+
+  const report = query.data || {}
+  const ageHours = Number(report.age_hours)
+
+  return jsx(Card, {
+    title,
+    icon,
+    children: [
+      report.available ? jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '10px' }, children: [
+        jsx('span', { style: styles.label, children: 'Control report' }),
+        jsxs('span', { style: { ...styles.value, fontVariantNumeric: 'tabular-nums' }, children: [
+          formatRelativeTimestamp(report.generated_at),
+          Number.isFinite(ageHours) ? jsx('span', { style: { color: COLORS.muted, fontWeight: 400 }, children: ` · ${ageHours.toFixed(1)}h old` }) : null
+        ] })
+      ] }) : jsx('div', { style: styles.unavailable, children: report.note || 'No report generated yet. Run /sips-report in chat.' }),
+      jsx('div', { style: { display: 'flex', justifyContent: 'flex-end', marginTop: '10px' }, children: jsx(Button, { variant: 'outline', size: 'sm', onClick: openInChat, children: copied ? 'Copied' : 'Open in chat' }) }),
+      report.claim_boundary ? jsx('div', { style: { color: COLORS.muted, fontSize: '11px', marginTop: '10px' }, children: report.claim_boundary }) : null
+    ]
+  })
+}
+
 function EventsCard({ events }) {
   const [filter, setFilter] = useState('all')
   const [expanded, setExpanded] = useState(false)
@@ -3785,6 +3838,7 @@ function Dashboard({ api }) {
           jsx(HistoryCard, { api }),
           jsx(ProofCard, { proof: data.proof_layers, actionState }),
           jsx(RoutesCard, { api }),
+          jsx(ReportStatusCard, { api }),
           jsx(GateMatrixCard, { api })
         ] })
       ] }) : null,
