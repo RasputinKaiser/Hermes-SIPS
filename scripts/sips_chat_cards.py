@@ -641,6 +641,58 @@ def tool_latency_card(payload: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def timeline_card(payload: dict[str, Any]) -> str:
+    """Fleet/run timeline: recent runs + campaigns on one time axis."""
+    lines = _header("🗓", "Timeline", "runs + campaigns, newest first")
+    if not payload.get("available"):
+        lines.append(f"*{payload.get('reason') or 'Timeline unavailable.'}*")
+        lines.extend(_footer(payload.get("claim_boundary", "")))
+        return "\n".join(lines).rstrip() + "\n"
+
+    entries = payload.get("entries") or []
+    if not entries:
+        lines.append("*No runtime runs or campaigns tracked yet.*")
+        lines.extend(_footer(payload.get("claim_boundary", "")))
+        return "\n".join(lines).rstrip() + "\n"
+
+    status_icon = {"succeeded": "🟢", "failed": "🔴", "stale": "🟡", "running": "🔵"}
+    for e in entries:
+        kind = e.get("kind")
+        eid = str(e.get("id", ""))[:26]
+        when = _ago(e.get("ts"))
+        if kind == "run":
+            st = str(e.get("status", "?"))
+            icon = status_icon.get(st, "⚪")
+            lines.append(f"- {icon} `{eid}…` {st} · `{e.get('events', 0)}` events · {when}")
+        else:
+            st = str(e.get("status", "?"))
+            icon = status_icon.get(st, "🔵")
+            lines.append(f"- {icon} 🚩 `{eid}…` campaign · `{e.get('children', 0)}` children · {when}")
+
+    runs = sum(1 for e in entries if e.get("kind") == "run")
+    campaigns = len(entries) - runs
+    lines.append("")
+    lines.append(f"**{len(entries)} entries** ({runs} runs · {campaigns} campaigns) over ~`{payload.get('window_hours', '?')}h`")
+    if payload.get("total_tracked", 0) > len(entries):
+        lines.append(f"- … {payload['total_tracked'] - len(entries)} older hidden")
+    lines.extend(_footer(payload.get("claim_boundary", "")))
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _ago(ts: Any) -> str:
+    try:
+        import time as _t
+
+        delta = _t.time() - float(ts)
+    except (TypeError, ValueError):
+        return "?"
+    if delta < 3600:
+        return f"{max(1, int(delta // 60))}m ago"
+    if delta < 86400:
+        return f"{int(delta // 3600)}h ago"
+    return f"{int(delta // 86400)}d ago"
+
+
 def selfloop_card(payload: dict[str, Any]) -> str:
     lines = _header("🔁", "SIPS Selfloop", "persistent improvement loop")
     raw_state = payload.get("state")

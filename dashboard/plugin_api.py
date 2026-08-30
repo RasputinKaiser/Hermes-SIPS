@@ -613,6 +613,14 @@ def get_run_quality(run_id: str) -> dict[str, Any]:
     return run_quality_payload(run_id)
 
 
+@router.get("/timeline")
+def get_timeline() -> dict[str, Any]:
+    """Fleet/run timeline: recent runs + campaigns on one time axis (read-only)."""
+    from fleet_timeline import timeline_payload
+
+    return timeline_payload()
+
+
 @router.get("/context-scan")
 def get_context_scan() -> dict[str, Any]:
     """Oversized-file risks + bounded-read commands for the SIPS repo (read-only)."""

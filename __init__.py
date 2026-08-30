@@ -365,6 +365,19 @@ def _command_perception(_homebase: Any, raw: str) -> str:
         return "Perception plan unavailable right now."
 
 
+def _command_timeline(_homebase: Any, _raw: str) -> str:
+    """Fleet/run timeline via fleet_timeline (direct import)."""
+    try:
+        from .scripts.fleet_timeline import timeline_payload
+    except ImportError:
+        from fleet_timeline import timeline_payload  # type: ignore[no-redef]
+    try:
+        return _cards.timeline_card(timeline_payload())
+    except Exception:
+        logger.debug("SIPS timeline card render failed", exc_info=True)
+        return "Timeline unavailable right now."
+
+
 def _command_audit(homebase: Any, _raw: str) -> str:
     return _card_result(homebase, "homebase_host_audit", {"root": str(_PLUGIN_ROOT)}, _cards.audit_card)
 
@@ -444,6 +457,7 @@ def _register_commands(ctx: Any, homebase: Any) -> None:
         "sips-repro": (partial(_command_repro, homebase), "Turn a symptom into a repro plan", "<goal> :: <symptom>"),
         "sips-factory": (partial(_command_factory, homebase), "Tool reuse-vs-new verdict", "<desired-tool> [task]"),
         "sips-perceive": (partial(_command_perception, homebase), "Visual/perception verification plan", "<surface> <target> :: <expected>"),
+        "sips-timeline": (partial(_command_timeline, homebase), "Show the fleet/run timeline, newest first", ""),
         "sips-quality": (partial(_command_quality, homebase), "Show one run's quality lens (gates, evidence, tags)", "<run_id>"),
         "sips-latency": (partial(_command_latency, homebase), "Show per-tool latency percentiles (hours 1-168, default 24)", "[hours]"),
         "sips-lifecycle": (partial(_command_lifecycle, homebase), "Show the agent hook-stream lifecycle lens", ""),
