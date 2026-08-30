@@ -35,6 +35,13 @@ except ImportError:
         sys.path.insert(0, str(_SCRIPTS_ROOT))
     import sips_chat_cards as _cards  # type: ignore[no-redef]
 
+try:
+    from .scripts import context_lens_cards as _ctx_cards
+except ImportError:
+    if str(_SCRIPTS_ROOT) not in sys.path:
+        sys.path.insert(0, str(_SCRIPTS_ROOT))
+    import context_lens_cards as _ctx_cards  # type: ignore[no-redef]
+
 
 def _load_homebase():
     hermes_adapter.configure_environment()
@@ -249,6 +256,47 @@ def _command_quality(_homebase: Any, raw: str) -> str:
         return "Run quality lens unavailable right now."
 
 
+def _homebase_route_payload(root: Any, tool: str, args: dict[str, Any]) -> dict[str, Any]:
+    """Call a homebase MCP tool through the local homebase and return its data."""
+    return _card_result(root, tool, args, lambda payload: payload)
+
+
+def _command_context_scan(_homebase: Any, raw: str) -> str:
+    """homebase_context_scan rendered as a context-lens card."""
+    try:
+        from .scripts.harness_homebase_mcp import context_scan_payload
+    except ImportError:
+        from harness_homebase_mcp import context_scan_payload  # type: ignore[no-redef]
+    try:
+        from pathlib import Path as _P
+        root = _P(str(raw.strip() or "."))
+        payload = context_scan_payload(root, ["*.py", "*.md", "*.json", "*.ts", "*.js"], 20, 50000)
+        return _ctx_cards.context_scan_card(payload)
+    except Exception:
+        logger.debug("SIPS context scan card render failed", exc_info=True)
+        return "Context scan unavailable right now."
+
+
+def _command_distill(_homebase: Any, raw: str) -> str:
+    """homebase_distill_context rendered as a context-lens card. Usage: /sips-distill <path> :: <query>"""
+    parts = str(raw or "").split("::", 1)
+    path_part = parts[0].strip()
+    query = parts[1].strip() if len(parts) > 1 else ""
+    if not path_part:
+        return "Usage: /sips-distill <file-or-glob> :: <query>"
+    try:
+        from .scripts.harness_homebase_mcp import distill_payload
+    except ImportError:
+        from harness_homebase_mcp import distill_payload  # type: ignore[no-redef]
+    try:
+        from pathlib import Path as _P
+        payload = distill_payload(_P.cwd(), [path_part], query, 40, 2000)
+        return _ctx_cards.distill_card(payload)
+    except Exception:
+        logger.debug("SIPS distill card render failed", exc_info=True)
+        return "Context distill unavailable right now."
+
+
 def _command_audit(homebase: Any, _raw: str) -> str:
     return _card_result(homebase, "homebase_host_audit", {"root": str(_PLUGIN_ROOT)}, _cards.audit_card)
 
@@ -323,6 +371,8 @@ def _register_commands(ctx: Any, homebase: Any) -> None:
         "sips-record": (partial(_command_record, homebase), "Record a bounded SIPS learning", "<title> :: <body>"),
         "sips-usage": (partial(_command_usage, homebase), "Show LLM token usage lens (days 1-30, default 7)", "[days]"),
         "sips-gates": (partial(_command_gates, homebase), "Show gate-evidence matrix for recent runs", ""),
+        "sips-scan": (partial(_command_context_scan, homebase), "Scan cwd for oversized context risks + bounded reads", "[path]"),
+        "sips-distill": (partial(_command_distill, homebase), "Distill bounded excerpts from a file", "<path> :: <query>"),
         "sips-quality": (partial(_command_quality, homebase), "Show one run's quality lens (gates, evidence, tags)", "<run_id>"),
         "sips-latency": (partial(_command_latency, homebase), "Show per-tool latency percentiles (hours 1-168, default 24)", "[hours]"),
         "sips-lifecycle": (partial(_command_lifecycle, homebase), "Show the agent hook-stream lifecycle lens", ""),
