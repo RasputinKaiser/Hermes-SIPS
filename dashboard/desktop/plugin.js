@@ -3195,6 +3195,72 @@ function ToolLatencyCard({ api }) {
   })
 }
 
+// Timeline lens: the most recent runs and campaigns from GET /timeline as a
+// vertical time axis. One status-colored row per entry: glyph, truncated id,
+// relative timestamp, and the event count (runs) or children count (campaigns).
+// Bounds to 12 rows with a muted overflow note so the card stays scannable.
+function TimelineCard({ api }) {
+  const query = useQuery({ queryKey: ['sips', 'timeline'], queryFn: () => api.rest('/timeline'), refetchInterval: pollInterval(30000) })
+  const title = 'Timeline'
+  const icon = 'history'
+
+  if (query.isLoading) {
+    return jsx(Card, { title, icon, children: jsx('div', { style: styles.unavailable, children: 'Reading the timeline…' }) })
+  }
+  if (query.isError) {
+    return jsx(Card, {
+      title,
+      icon,
+      hint: 'Backed by the run and campaign ledger.',
+      children: jsx('div', { style: styles.unavailable, children: 'The timeline endpoint is unavailable right now. Retry from the header refresh.' })
+    })
+  }
+
+  const entries = Array.isArray(query.data?.entries) ? query.data.entries : []
+  if (!query.data?.available || !entries.length) {
+    return jsx(Card, {
+      title,
+      icon,
+      hint: 'Backed by the run and campaign ledger.',
+      children: jsx('div', { style: styles.unavailable, children: 'No timeline entries yet.' })
+    })
+  }
+
+  const glyphFor = (entry) => entry.kind === 'campaign' ? '◇' : entry.status === 'succeeded' ? '✓' : entry.status === 'failed' ? '✗' : '◐'
+  const toneKeyFor = (entry) => {
+    if (entry.kind === 'campaign') return 'muted'
+    if (entry.status === 'succeeded') return 'good'
+    if (entry.status === 'failed') return 'bad'
+    if (entry.status === 'stale') return 'warn'
+    return 'accent'
+  }
+
+  const visible = entries.slice(0, 12)
+  const olderCount = entries.length - visible.length
+
+  return jsx(Card, {
+    title,
+    icon,
+    hint: `${compactNumber(entries.length)} recent entries · runs and campaigns`,
+    children: [
+      jsx('div', { style: { display: 'grid', gap: '7px' }, children: visible.map((entry) => {
+        const color = COLORS[toneKeyFor(entry)] || COLORS.muted
+        const countLabel = entry.kind === 'campaign' ? `${compactNumber(entry.children)} children` : `${compactNumber(entry.events)} events`
+        return jsxs('div', {
+          style: { display: 'flex', alignItems: 'baseline', gap: '8px', minWidth: 0 },
+          children: [
+            jsx('span', { 'aria-hidden': true, style: { color, flexShrink: 0, width: '12px', textAlign: 'center' }, children: glyphFor(entry) }),
+            jsx('span', { title: entry.id, style: { color, fontFamily: 'ui-monospace, monospace', fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: String(entry.id || '?').slice(0, 24) }),
+            jsx('span', { style: { flexShrink: 0, marginLeft: 'auto', color: COLORS.muted, fontSize: '11px' }, children: formatRelativeTimestamp(entry.ts ? entry.ts * 1000 : null) }),
+            jsx('span', { style: { flexShrink: 0, color: COLORS.muted, fontSize: '11px', fontVariantNumeric: 'tabular-nums' }, children: countLabel })
+          ]
+        }, `timeline-${entry.kind || 'run'}-${entry.id}`)
+      }) }),
+      olderCount > 0 ? jsx('div', { style: { color: COLORS.muted, fontSize: '11px', marginTop: '8px' }, children: `…${compactNumber(olderCount)} older` }) : null
+    ]
+  })
+}
+
 function EventsCard({ events }) {
   const [filter, setFilter] = useState('all')
   const [expanded, setExpanded] = useState(false)
@@ -3649,6 +3715,7 @@ function Dashboard({ api }) {
           jsx(RuntimeCard, { api }),
           jsx(RunsCard, { api }),
           jsx(FleetCard, { api }),
+          jsx(TimelineCard, { api }),
           jsx(MemoryBrowser, { api }),
           jsx(MemoryCard, { memory: data.memory }),
           jsx(SurfaceCard, { counts, lifecycle: data.lifecycle, onOpenActivity: () => switchTab('activity') }),
