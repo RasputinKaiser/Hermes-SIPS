@@ -42,6 +42,13 @@ except ImportError:
         sys.path.insert(0, str(_SCRIPTS_ROOT))
     import context_lens_cards as _ctx_cards  # type: ignore[no-redef]
 
+try:
+    from .scripts import context_lens_cards2 as _ctx_cards2
+except ImportError:
+    if str(_SCRIPTS_ROOT) not in sys.path:
+        sys.path.insert(0, str(_SCRIPTS_ROOT))
+    import context_lens_cards2 as _ctx_cards2  # type: ignore[no-redef]
+
 
 def _load_homebase():
     hermes_adapter.configure_environment()
@@ -297,6 +304,67 @@ def _command_distill(_homebase: Any, raw: str) -> str:
         return "Context distill unavailable right now."
 
 
+def _command_repro(_homebase: Any, raw: str) -> str:
+    """homebase_execution_repro rendered as a repro-plan card. Usage: /sips-repro <goal> :: <symptom>"""
+    parts = str(raw or "").split("::", 1)
+    goal = parts[0].strip()
+    symptom = parts[1].strip() if len(parts) > 1 else ""
+    if not goal:
+        return "Usage: /sips-repro <goal> :: <symptom>"
+    try:
+        from .scripts.harness_homebase_mcp import execution_repro_payload
+    except ImportError:
+        from harness_homebase_mcp import execution_repro_payload  # type: ignore[no-redef]
+    try:
+        from pathlib import Path as _P
+        payload = execution_repro_payload(_P.cwd(), goal, [symptom] if symptom else [], [], [])
+        return _ctx_cards2.execution_repro_card(payload)
+    except Exception:
+        logger.debug("SIPS repro card render failed", exc_info=True)
+        return "Execution repro unavailable right now."
+
+
+def _command_factory(_homebase: Any, raw: str) -> str:
+    """homebase_tool_factory verdict card. Usage: /sips-factory <desired-tool> [task]"""
+    parts = str(raw or "").split(maxsplit=1)
+    desired = parts[0].strip() if parts else ""
+    task = parts[1].strip() if len(parts) > 1 else desired
+    if not desired:
+        return "Usage: /sips-factory <desired-tool> [task]"
+    try:
+        from .scripts.harness_homebase_mcp import tool_factory_payload
+    except ImportError:
+        from harness_homebase_mcp import tool_factory_payload  # type: ignore[no-redef]
+    try:
+        from pathlib import Path as _P
+        payload = tool_factory_payload(_P.cwd(), task, desired, "", False)
+        return _ctx_cards2.tool_factory_card(payload)
+    except Exception:
+        logger.debug("SIPS tool factory card render failed", exc_info=True)
+        return "Tool factory unavailable right now."
+
+
+def _command_perception(_homebase: Any, raw: str) -> str:
+    """homebase_perception_plan card. Usage: /sips-perceive <surface> <target> :: <expected state>"""
+    parts = str(raw or "").split("::", 1)
+    head = parts[0].strip().split(maxsplit=2)
+    expected = parts[1].strip() if len(parts) > 1 else ""
+    if len(head) < 2:
+        return "Usage: /sips-perceive <surface> <target> :: <expected state>"
+    surface, target = head[0], head[1]
+    try:
+        from .scripts.harness_homebase_mcp import perception_plan_payload
+    except ImportError:
+        from harness_homebase_mcp import perception_plan_payload  # type: ignore[no-redef]
+    try:
+        from pathlib import Path as _P
+        payload = perception_plan_payload(_P.cwd(), surface, target, [expected] if expected else [])
+        return _ctx_cards2.perception_plan_card(payload)
+    except Exception:
+        logger.debug("SIPS perception card render failed", exc_info=True)
+        return "Perception plan unavailable right now."
+
+
 def _command_audit(homebase: Any, _raw: str) -> str:
     return _card_result(homebase, "homebase_host_audit", {"root": str(_PLUGIN_ROOT)}, _cards.audit_card)
 
@@ -373,6 +441,9 @@ def _register_commands(ctx: Any, homebase: Any) -> None:
         "sips-gates": (partial(_command_gates, homebase), "Show gate-evidence matrix for recent runs", ""),
         "sips-scan": (partial(_command_context_scan, homebase), "Scan cwd for oversized context risks + bounded reads", "[path]"),
         "sips-distill": (partial(_command_distill, homebase), "Distill bounded excerpts from a file", "<path> :: <query>"),
+        "sips-repro": (partial(_command_repro, homebase), "Turn a symptom into a repro plan", "<goal> :: <symptom>"),
+        "sips-factory": (partial(_command_factory, homebase), "Tool reuse-vs-new verdict", "<desired-tool> [task]"),
+        "sips-perceive": (partial(_command_perception, homebase), "Visual/perception verification plan", "<surface> <target> :: <expected>"),
         "sips-quality": (partial(_command_quality, homebase), "Show one run's quality lens (gates, evidence, tags)", "<run_id>"),
         "sips-latency": (partial(_command_latency, homebase), "Show per-tool latency percentiles (hours 1-168, default 24)", "[hours]"),
         "sips-lifecycle": (partial(_command_lifecycle, homebase), "Show the agent hook-stream lifecycle lens", ""),
