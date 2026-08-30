@@ -3027,6 +3027,77 @@ function TokenUsageCard({ api }) {
   })
 }
 
+// Context-scan lens: oversized files that dominate context burn, from
+// /context-scan (homebase.context_scan.v1). One max-scaled bar per risk
+// ordered heaviest first, tone dot by estimated tokens (red >25K, yellow
+// >10K, green else), plus the bounded_read command that inspects each file
+// without reopening the whole thing into context.
+function contextTone(tokens) {
+  const n = Number(tokens) || 0
+  if (n > 25000) return COLORS.bad
+  if (n > 10000) return COLORS.warn
+  return COLORS.good
+}
+
+function ContextScanCard({ api }) {
+  const query = useQuery({ queryKey: ['sips-control-plane', 'context-scan'], queryFn: () => api.rest('/context-scan'), refetchInterval: pollInterval(60000) })
+  const title = 'Context scan'
+  const icon = 'eye'
+
+  if (query.isLoading) {
+    return jsx(Card, { title, icon, children: jsx('div', { style: styles.unavailable, children: 'Scanning oversized files…' }) })
+  }
+  if (query.isError || !query.data?.available) {
+    return jsx(Card, {
+      title,
+      icon,
+      hint: 'Bounded scan of files that threaten the context budget.',
+      children: jsx('div', { style: styles.unavailable, children: query.data?.claim_boundary || 'The context-scan endpoint is unavailable right now.' })
+    })
+  }
+
+  const data = query.data
+  const risks = (data.risks || []).slice().sort((a, b) => (Number(b.estimated_tokens) || 0) - (Number(a.estimated_tokens) || 0))
+  const maxTokens = Math.max(...risks.map((row) => Number(row.estimated_tokens) || 0), 1)
+  const shown = risks.length
+  const total = Number(data.risk_count) || shown
+
+  return jsx(Card, {
+    title,
+    icon,
+    hint: shown
+      ? `${compactNumber(total)} file${total === 1 ? '' : 's'} over the ${formatTokens(data.max_bytes)}-byte line · heaviest ${shown} shown`
+      : `${compactNumber(total)} file${total === 1 ? '' : 's'} over the ${formatTokens(data.max_bytes)}-byte line`,
+    children: risks.length ? jsx('div', { style: { display: 'grid', gap: '9px' }, children: risks.map((row) => {
+      const tokens = Number(row.estimated_tokens) || 0
+      const bytes = Number(row.bytes) || 0
+      const tone = contextTone(tokens)
+      const read = String(row.bounded_read || '')
+      return jsxs('div', {
+        children: [
+          jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '10px', marginBottom: '4px' }, children: [
+            jsxs('span', { title: row.path, style: { display: 'inline-flex', alignItems: 'center', minWidth: 0, fontSize: '12px', fontWeight: 650, fontFamily: 'ui-monospace, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: [
+              jsx('span', { 'aria-hidden': true, style: { flexShrink: 0, width: '7px', height: '7px', borderRadius: '999px', background: tone, marginRight: '6px' } }),
+              row.path || 'unknown path'
+            ] }),
+            jsxs('span', { style: { flexShrink: 0, fontSize: '11px', fontVariantNumeric: 'tabular-nums' }, children: [
+              jsx('span', { style: { color: COLORS.muted }, children: `${compactNumber(bytes)}B` }),
+              jsx('span', { style: { color: tone, fontWeight: 650 }, children: ` · ~${formatTokens(tokens)} tok` })
+            ] })
+          ] }),
+          jsx('div', {
+            style: { height: '5px', borderRadius: '999px', background: 'rgba(255,255,255,0.08)', overflow: 'hidden' },
+            role: 'img',
+            'aria-label': `${row.path}: ~${tokens} estimated tokens, ${bytes} bytes`,
+            children: jsx('div', { style: { height: '100%', width: `${tokens / maxTokens * 100}%`, borderRadius: '999px', background: tone, opacity: 0.75 } })
+          }),
+          read ? jsx('div', { title: read, style: { marginTop: '3px', fontSize: '11px', fontFamily: 'ui-monospace, monospace', color: COLORS.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: read }) : null
+        ]
+      }, `ctxscan-${row.path || 'unknown'}`)
+    }) }) : jsx('div', { style: styles.unavailable, children: 'Context is clean' })
+  })
+}
+
 // Tool-latency lens: bounded duration aggregates from the hook stream via
 // /tool-latency (sips.tool-latency.v1). One max-scaled bar per tool ordered by
 // total_ms descending, median/p90/max in compact form. Durations only started
@@ -3580,7 +3651,8 @@ function Dashboard({ api }) {
           jsx(FleetCard, { api }),
           jsx(MemoryBrowser, { api }),
           jsx(MemoryCard, { memory: data.memory }),
-          jsx(SurfaceCard, { counts, lifecycle: data.lifecycle, onOpenActivity: () => switchTab('activity') })
+          jsx(SurfaceCard, { counts, lifecycle: data.lifecycle, onOpenActivity: () => switchTab('activity') }),
+          jsx(ContextScanCard, { api })
         ] })
       ] }) : null,
       activeTab === 'verification' ? jsxs('div', { children: [
