@@ -3261,6 +3261,63 @@ function TimelineCard({ api }) {
   })
 }
 
+// Verdict lens: per-tool call outcomes from GET /verdicts?window_hours=24.
+// One row per tool: icon, truncated name, call count, a verdict pill colored
+// ok->good / slow->warn / stalled->bad / denied->bad, and p95/median durations
+// via formatMs. Backend sorts worst-first, so payload order is preserved.
+const VERDICT_TONE = { ok: 'good', slow: 'warn', stalled: 'bad', denied: 'bad' }
+
+function VerdictsCard({ api }) {
+  const query = useQuery({ queryKey: ['sips', 'verdicts'], queryFn: () => api.rest('/verdicts?window_hours=24'), refetchInterval: pollInterval(45000) })
+  const title = 'Tool verdicts'
+  const icon = 'checklist'
+
+  if (query.isLoading) {
+    return jsx(Card, { title, icon, children: jsx('div', { style: styles.unavailable, children: 'Reading tool verdicts…' }) })
+  }
+  if (query.isError) {
+    return jsx(Card, {
+      title,
+      icon,
+      hint: 'Backed by the agent hook stream.',
+      children: jsx('div', { style: styles.unavailable, children: 'The verdicts endpoint is unavailable right now. Retry from the header refresh.' })
+    })
+  }
+
+  const verdicts = Array.isArray(query.data?.verdicts) ? query.data.verdicts : []
+  if (!query.data?.available || !verdicts.length) {
+    return jsx(Card, {
+      title,
+      icon,
+      hint: 'Backed by the agent hook stream.',
+      children: jsx('div', { style: styles.unavailable, children: 'No tool calls in the window yet.' })
+    })
+  }
+
+  return jsx(Card, {
+    title,
+    icon,
+    hint: `${compactNumber(verdicts.length)} tool${verdicts.length === 1 ? '' : 's'} · ${query.data.window_hours}h window · worst first`,
+    children: jsx('div', { style: { display: 'grid', gap: '7px' }, children: verdicts.map((entry) => {
+      const pillColor = COLORS[VERDICT_TONE[entry.verdict]] || COLORS.muted
+      const denials = Number(entry.denials) || 0
+      return jsxs('div', {
+        style: { display: 'flex', alignItems: 'baseline', gap: '8px', minWidth: 0 },
+        children: [
+          jsxs('span', { title: entry.tool, style: { display: 'inline-flex', alignItems: 'baseline', gap: '6px', minWidth: 0, flexShrink: 1, overflow: 'hidden' }, children: [
+            jsx('span', { 'aria-hidden': true, style: { flexShrink: 0 }, children: toolIcon(entry.tool) }),
+            jsx('span', { style: { fontFamily: 'ui-monospace, monospace', fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: String(entry.tool || 'unknown tool').slice(0, 24) })
+          ] }),
+          jsx('span', { style: { flexShrink: 0, color: COLORS.muted, fontSize: '11px', fontVariantNumeric: 'tabular-nums' }, children: `${compactNumber(entry.calls)} calls` }),
+          jsx('span', { style: { flexShrink: 0, color: COLORS.muted, fontSize: '11px', fontVariantNumeric: 'tabular-nums' }, children: `p95 ${formatMs(entry.p95_ms)} · med ${formatMs(entry.median_ms)}` }),
+          denials > 0 ? jsx('span', { style: { flexShrink: 0, color: COLORS.bad, fontSize: '11px', fontVariantNumeric: 'tabular-nums' }, children: `${compactNumber(denials)} denied` }) : null,
+          jsx(Badge, { variant: 'outline', style: { ...styles.metaBadge, color: pillColor, borderColor: pillColor, marginLeft: 'auto', flexShrink: 0 }, children: formatStatus(entry.verdict) })
+        ]
+      }, `verdict-${entry.tool || 'unknown'}`)
+    }) })
+  })
+}
+
 function EventsCard({ events }) {
   const [filter, setFilter] = useState('all')
   const [expanded, setExpanded] = useState(false)
@@ -3741,6 +3798,7 @@ function Dashboard({ api }) {
           jsx(ToolCallsCard, { api }),
           jsx(TokenUsageCard, { api }),
           jsx(ToolLatencyCard, { api }),
+          jsx(VerdictsCard, { api }),
           jsx(HookFlowCard, { events: data.events }),
           jsx(EventsCard, { events: data.events })
         ] })
