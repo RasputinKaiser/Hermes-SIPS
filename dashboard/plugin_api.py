@@ -613,6 +613,29 @@ def get_run_quality(run_id: str) -> dict[str, Any]:
     return run_quality_payload(run_id)
 
 
+@router.get("/context-scan")
+def get_context_scan() -> dict[str, Any]:
+    """Oversized-file risks + bounded-read commands for the SIPS repo (read-only)."""
+    try:
+        from harness_homebase_mcp import context_scan_payload
+
+        payload = context_scan_payload(PLUGIN_ROOT, ["*.py", "*.md", "*.json", "*.ts", "*.js"], 20, 50000)
+    except Exception as exc:  # pragma: no cover - defensive API boundary
+        return {
+            "schema": "homebase.context_scan.v1",
+            "available": False,
+            "reason": f"context scan failed: {type(exc).__name__}",
+            "risks": [],
+            "risk_count": 0,
+            "generated_at": _now(),
+            "claim_boundary": "The context scan failed before producing risks.",
+        }
+    payload["available"] = True
+    payload["generated_at"] = _now()
+    payload.setdefault("claim_boundary", "Bounded file metadata only; file contents stay on the host.")
+    return payload
+
+
 @router.get("/tool-latency")
 def get_tool_latency(window_hours: int = 24) -> dict[str, Any]:
     """Per-tool duration statistics from the hook stream (read-only)."""
