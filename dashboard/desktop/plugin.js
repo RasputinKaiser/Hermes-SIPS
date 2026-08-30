@@ -3027,6 +3027,103 @@ function TokenUsageCard({ api }) {
   })
 }
 
+// Tool-latency lens: bounded duration aggregates from the hook stream via
+// /tool-latency (sips.tool-latency.v1). One max-scaled bar per tool ordered by
+// total_ms descending, median/p90/max in compact form. Durations only started
+// recording recently, so tools with calls but no timed calls yet render as
+// muted 'awaiting timings' rows at the bottom.
+function formatMs(value) {
+  const n = Number(value) || 0
+  if (n >= 60000) return `${(n / 60000).toFixed(1)}m`
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}s`
+  return `${Math.round(n)}ms`
+}
+
+function ToolLatencyCard({ api }) {
+  const query = useQuery({ queryKey: ['sips-control-plane', 'tool-latency'], queryFn: () => api.rest('/tool-latency'), refetchInterval: pollInterval(45000) })
+  const title = 'Tool latency'
+  const icon = 'pulse'
+
+  if (query.isLoading) {
+    return jsx(Card, { title, icon, children: jsx('div', { style: styles.unavailable, children: 'Reading tool latency…' }) })
+  }
+  if (query.isError || !query.data?.available) {
+    return jsx(Card, {
+      title,
+      icon,
+      hint: 'Backed by the agent hook stream.',
+      children: jsx('div', { style: styles.unavailable, children: query.data?.reason || 'The tool-latency endpoint is unavailable right now.' })
+    })
+  }
+
+  const data = query.data
+  const timedMs = (row) => {
+    if (row.total_ms != null) return Number(row.total_ms) || 0
+    return (Number(row.total_s) || 0) * 1000
+  }
+  const timedCalls = (row) => {
+    const n = Number(row.timed_calls)
+    if (Number.isFinite(n)) return n
+    return row.median_ms != null ? (Number(row.calls) || 0) : 0
+  }
+  const all = (data.tools || []).slice().sort((a, b) => timedMs(b) - timedMs(a))
+  const timed = all.filter((row) => timedCalls(row) > 0 && timedMs(row) > 0)
+  const awaiting = all.filter((row) => timedCalls(row) === 0 && (Number(row.calls) || 0) > 0).slice(0, 3)
+
+  if (!all.length) {
+    return jsx(Card, {
+      title,
+      icon,
+      hint: `${data.window_hours}h window · read-only duration aggregate, no tool arguments or outputs`,
+      children: jsx('div', { style: styles.unavailable, children: 'No tool calls observed in the current window.' })
+    })
+  }
+
+  const totalTimed = Number(data.timed_calls) || timed.reduce((sum, row) => sum + timedCalls(row), 0)
+  const maxMs = Math.max(...timed.map(timedMs), 1)
+
+  return jsx(Card, {
+    title,
+    icon,
+    hint: `${compactNumber(totalTimed)} timed calls · ${data.window_hours}h window`,
+    children: [
+      jsx('div', { style: { display: 'grid', gap: '9px' }, children: timed.map((row) => {
+        const ms = timedMs(row)
+        const errors = Number(row.error_count) || 0
+        return jsxs('div', {
+          children: [
+            jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '10px', marginBottom: '4px' }, children: [
+              jsxs('span', { style: { fontSize: '12px', fontWeight: 650, fontFamily: 'ui-monospace, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: [
+                jsx('span', { 'aria-hidden': true, style: { marginRight: '6px', flexShrink: 0 }, children: toolIcon(row.tool) }),
+                row.tool || 'unknown tool'
+              ] }),
+              jsxs('span', { style: { flexShrink: 0, fontSize: '11px', fontVariantNumeric: 'tabular-nums' }, children: [
+                jsx('span', { style: { color: COLORS.text, fontWeight: 650 }, children: formatMs(row.median_ms) }),
+                jsx('span', { style: { color: COLORS.muted }, children: ` · ${formatMs(row.p90_ms)} · ${formatMs(row.max_ms)}` }),
+                errors ? jsx('span', { style: { color: COLORS.warn }, children: ` · ${errors} err` }) : null
+              ] })
+            ] }),
+            jsx('div', {
+              style: { height: '7px', borderRadius: '999px', background: 'rgba(255,255,255,0.08)', overflow: 'hidden' },
+              role: 'img',
+              'aria-label': `${row.tool}: median ${formatMs(row.median_ms)}, p90 ${formatMs(row.p90_ms)}, max ${formatMs(row.max_ms)} across ${timedCalls(row)} timed calls`,
+              children: jsx('div', { style: { height: '100%', width: `${ms / maxMs * 100}%`, borderRadius: '999px', background: COLORS.accent, opacity: 0.75 } })
+            })
+          ]
+        }, `toollat-${row.tool || 'unknown'}`)
+      }) }),
+      awaiting.length ? jsx('div', { style: { display: 'grid', gap: '5px', marginTop: timed.length ? '10px' : undefined }, children: awaiting.map((row) => jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '10px' }, children: [
+        jsxs('span', { style: { fontSize: '11px', fontFamily: 'ui-monospace, monospace', color: COLORS.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: [
+          jsx('span', { 'aria-hidden': true, style: { marginRight: '6px', flexShrink: 0 }, children: toolIcon(row.tool) }),
+          row.tool || 'unknown tool'
+        ] }),
+        jsx('span', { style: { flexShrink: 0, fontSize: '11px', color: COLORS.muted }, children: 'awaiting timings' })
+      ] }, `toollatwait-${row.tool || 'unknown'}`)) }) : null,
+      !timed.length ? jsx('div', { style: { ...styles.label, fontSize: '10px', marginTop: '8px' }, children: 'No durations recorded yet — timings appear as the hook stream fills.' }) : null
+    ]
+  })
+}
+
 function EventsCard({ events }) {
   const [filter, setFilter] = useState('all')
   const [expanded, setExpanded] = useState(false)
@@ -3504,6 +3601,7 @@ function Dashboard({ api }) {
         jsx('div', { style: styles.supportGrid, children: [
           jsx(ToolCallsCard, { api }),
           jsx(TokenUsageCard, { api }),
+          jsx(ToolLatencyCard, { api }),
           jsx(HookFlowCard, { events: data.events }),
           jsx(EventsCard, { events: data.events })
         ] })

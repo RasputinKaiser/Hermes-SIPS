@@ -108,21 +108,23 @@ def tool_latency_payload(window_hours: int = 24) -> dict[str, Any]:
             {
                 "tool": name,
                 "calls": n,
+                "timed_calls": n,
                 "median_ms": _percentile(ordered, 0.5),
                 "p90_ms": _percentile(ordered, 0.9),
                 "max_ms": ordered[-1],
+                "total_ms": total,
                 "total_s": round(total / 1000.0, 1),
             }
         )
-    tools_out.sort(key=lambda row: -row["total_s"])
+    tools_out.sort(key=lambda row: -row["total_ms"])
 
-    total_calls = sum(row["calls"] for row in tools_out)
+    timed_calls = sum(row["timed_calls"] for row in tools_out)
     return {
         "schema": "sips.tool-latency.v1",
         "available": True,
         "window_hours": window_hours,
+        "timed_calls": timed_calls,
         "tools": tools_out[:_MAX_TOOLS],
-        "total_calls": total_calls,
         "note": "durations appear in the stream from hermes_adapter 0.19.2 onward; older events are skipped",
         "generated_at": _now(),
         "claim_boundary": claim_boundary,
