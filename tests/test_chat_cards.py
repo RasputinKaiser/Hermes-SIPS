@@ -358,3 +358,29 @@ def test_run_quality_card_renders_gates_evidence_budget() -> None:
 def test_run_quality_card_unavailable() -> None:
     card = cards.run_quality_card({"available": False, "run_id": "run-x", "reason": "no graph receipt for this run", "claim_boundary": "cb"})
     assert "no graph receipt" in card
+
+
+def test_tool_latency_card_renders_percentiles_and_bars() -> None:
+    payload = {
+        "available": True,
+        "window_hours": 24,
+        "total_calls": 5,
+        "tools": [
+            {"tool": "terminal", "calls": 4, "median_ms": 250, "p90_ms": 790, "max_ms": 1000, "total_s": 1.6},
+            {"tool": "browser_exec", "calls": 1, "median_ms": 45970, "p90_ms": 45970, "max_ms": 45970, "total_s": 46.0},
+        ],
+        "claim_boundary": "ms only",
+    }
+    card = cards.tool_latency_card(payload)
+    assert "⏱ Tool Latency" in card
+    assert "24h window" in card and "`5` timed calls" in card
+    assert "❯ `terminal` med `250ms` · p90 `790ms` · max `1.0s`" in card
+    assert "🌍 `browser_exec` med `46.0s`" in card
+    assert "🛡️ ms only" in card
+
+
+def test_tool_latency_card_empty_and_unavailable() -> None:
+    empty = cards.tool_latency_card({"available": True, "window_hours": 24, "total_calls": 0, "tools": [], "claim_boundary": ""})
+    assert "No timed tool calls yet" in empty
+    bad = cards.tool_latency_card({"available": False, "reason": "stream missing", "claim_boundary": "cb"})
+    assert "stream missing" in bad

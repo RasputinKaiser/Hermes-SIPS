@@ -386,7 +386,12 @@ def _on_post_tool_call(**kwargs: Any) -> None:
         record_tool_call(sid)
     except Exception:
         logger.debug("SIPS runtime beat skipped", exc_info=True)
-    _record_event("post_tool_call", kwargs, status="ok" if success is not False else "failed")
+    _record_event(
+        "post_tool_call",
+        kwargs,
+        status="ok" if success is not False else "failed",
+        duration_ms=int(kwargs.get("duration_ms") or 0) or None,
+    )
 
 
 def _on_pre_verify(**kwargs: Any) -> dict[str, str] | None:

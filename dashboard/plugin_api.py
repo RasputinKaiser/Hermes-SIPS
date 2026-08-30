@@ -613,6 +613,14 @@ def get_run_quality(run_id: str) -> dict[str, Any]:
     return run_quality_payload(run_id)
 
 
+@router.get("/tool-latency")
+def get_tool_latency(window_hours: int = 24) -> dict[str, Any]:
+    """Per-tool duration statistics from the hook stream (read-only)."""
+    from tool_latency import tool_latency_payload
+
+    return tool_latency_payload(window_hours=window_hours)
+
+
 @router.get("/goal-board")
 def get_goal_board() -> dict[str, Any]:
     """Unified Goal Board view: runtime projection joined with legacy goal state.

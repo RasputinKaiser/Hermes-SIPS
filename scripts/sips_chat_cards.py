@@ -605,6 +605,42 @@ def run_quality_card(payload: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def tool_latency_card(payload: dict[str, Any]) -> str:
+    """Tool-latency lens: per-tool median/p90/max from hook-stream durations."""
+    lines = _header("⏱", "Tool Latency", "hook-stream durations, per-tool percentiles")
+    if not payload.get("available"):
+        lines.append(f"*{payload.get('reason') or 'Hook stream unavailable.'}*")
+        lines.extend(_footer(payload.get("claim_boundary", "")))
+        return "\n".join(lines).rstrip() + "\n"
+
+    tools = payload.get("tools") or []
+    if not tools:
+        lines.append(
+            f"*No timed tool calls yet — durations record from hermes_adapter 0.19.2 onward; "
+            f"this fills as sessions run.*"
+        )
+        lines.extend(_footer(payload.get("claim_boundary", "")))
+        return "\n".join(lines).rstrip() + "\n"
+
+    lines.append(f"**{payload.get('window_hours', 24)}h window** — `{payload.get('total_calls', 0)}` timed calls")
+
+    def ms(v: Any) -> str:
+        n = float(v or 0)
+        return f"{n / 1000:.1f}s" if n >= 1000 else f"{int(n)}ms"
+
+    peak = max((t.get("total_s") or 0) for t in tools) or 1
+    for row in tools[:8]:
+        icon = tool_icon(row.get("tool"))
+        track = bar(row.get("total_s"), peak)
+        lines.append(
+            f"- {track} {icon} `{row['tool']}` med `{ms(row.get('median_ms'))}` · "
+            f"p90 `{ms(row.get('p90_ms'))}` · max `{ms(row.get('max_ms'))}` · "
+            f"`{row.get('calls', 0)} calls` / `{row.get('total_s', 0)}s`"
+        )
+    lines.extend(_footer(payload.get("claim_boundary", "")))
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def selfloop_card(payload: dict[str, Any]) -> str:
     lines = _header("🔁", "SIPS Selfloop", "persistent improvement loop")
     raw_state = payload.get("state")
