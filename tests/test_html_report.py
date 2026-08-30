@@ -79,7 +79,7 @@ def test_render_runs_merged_table():
     html = html_report._render_runs(matrix, {"available": False})
     assert "<b class=\"good\">1 passed all gates</b>" in html
     assert "not gated" in html
-    assert 'title="Integrity"' in html  # jargon-free column labels
+    assert 'title="Quality gate: Integrity' in html  # jargon-free column labels
 
 
 def test_run_dots_carry_aria_and_title():

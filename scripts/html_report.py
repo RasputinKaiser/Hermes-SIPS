@@ -74,8 +74,13 @@ table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nu
 td, th { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 13px; }
 tbody tr { transition: background .12s ease; }
 tbody tr:hover { background: color-mix(in srgb, var(--accent) 4%, transparent); }
+tbody tr:last-child td { border-bottom: 0; }
+th.c, td.c { text-align: center; }
+th.c { width: 72px; white-space: nowrap; }
+td.c .dot { margin-right: 0; }
+.scroll-x { overflow-x: auto; }
 th { color: var(--dim); font-size: 10px; text-transform: uppercase; letter-spacing: 0.09em;
-  border-bottom-color: var(--line); }
+  border-bottom-color: var(--line); white-space: nowrap; }
 td.r, th.r { text-align: right; }
 .bar-wrap { background: var(--panel3); border-radius: 99px; height: 6px; overflow: hidden; min-width: 90px; }
 .bar { height: 100%; border-radius: 99px; background: var(--accent); opacity: .85;
@@ -83,6 +88,7 @@ td.r, th.r { text-align: right; }
 @keyframes grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 .bar.n { background: var(--neutral); }
 .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12px; }
+td.mono { white-space: nowrap; }
 .ellip { display: inline-block; max-width: 240px; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; vertical-align: bottom; }
 @media (max-width: 560px) { .ellip { max-width: 150px; } }
@@ -92,6 +98,7 @@ td.r, th.r { text-align: right; }
 .n { background: var(--neutral); }
 .legend { margin-top: 10px; font-size: 12px; color: var(--mut); }
 .delta { margin-top: 10px; font-size: 12px; color: var(--mut); }
+.panel-h { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .09em; margin: 12px 0 4px; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 36px; }
 @media (max-width: 760px) { .two { grid-template-columns: 1fr; } body { padding: 24px 18px 40px; } }
 .foot { margin-top: 44px; color: var(--dim); font-size: 11px; border-top: 1px solid var(--line);
@@ -261,8 +268,8 @@ def _render_usage(usage: dict[str, Any], prev_rows: list[dict[str, Any]] | None 
         )
     daily_block = ""
     if daily_rows:
-        daily_block = f"""<div><h3 style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.09em;margin:12px 0 4px;">New tokens per day</h3>
-<table><tr><th>day</th><th class="r">new tokens</th><th class="r">served from cache</th><th></th></tr>{daily_rows}</table>
+        daily_block = f"""<div><h3 class="panel-h">New tokens per day</h3>
+<table><tr><th>day</th><th class="r">new tokens</th><th class="r">served from cache</th><th title="Bar length = share of the week's largest day">volume</th></tr>{daily_rows}</table>
 <p class="legend">bar length = new tokens sent &middot; cache % colored green &ge;90, amber 80&ndash;90, red &lt;80 &middot; today renders partial (gray) until the day closes</p></div>"""
 
     replay_rows = ""
@@ -289,7 +296,7 @@ def _render_usage(usage: dict[str, Any], prev_rows: list[dict[str, Any]] | None 
             else ""
         )
         sub_note = " &mdash; over half; trim subagent briefs" if share >= 50 else ""
-        replay_block = f"""<div><h3 style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.09em;margin:12px 0 4px;">Most reread tools</h3>
+        replay_block = f"""<div><h3 class="panel-h">Most reread tools</h3>
 <table>{replay_rows}</table>
 <p class="legend">{lever}Share of new tokens spent on subagents <b class="accent">{share}%</b> <span class="dim">({_fmt(sub)} / {_fmt(sub + direct)}{sub_note})</span></p></div>"""
 
@@ -297,14 +304,15 @@ def _render_usage(usage: dict[str, Any], prev_rows: list[dict[str, Any]] | None 
     two = f'<div class="two">{inner}</div>' if inner else ""
     delta = _delta_line((usage.get("daily") or [])[-7:], prev_rows or [])
 
+    replay_top = _fmt(tools[0].get("replayed_tokens_est")) if tools else None
     return f"""
 <section><h2>Token usage &middot; last {usage.get('window_days', 7)} days</h2>
 <div class="grid">
-  <div class="stat"><div class="v">{_fmt(t.get('fresh_input_tokens'))}</div><div class="l">new tokens sent</div></div>
-  <div class="stat"><div class="v {hit_cls}">{hit}%</div><div class="l">served from cache</div><div class="d">of {_fmt(t.get('total_input_tokens'))} total &middot; green &ge;90, amber 80&ndash;90, red &lt;80</div></div>
+  <div class="stat"><div class="v">{_fmt(t.get('fresh_input_tokens'))}</div><div class="l">new tokens sent</div><div class="d">of {_fmt(t.get('total_input_tokens'))} total read incl. cache</div></div>
+  <div class="stat"><div class="v {hit_cls}">{hit}%</div><div class="l">served from cache</div><div class="d">green&nbsp;&ge;90, amber&nbsp;80&ndash;90, red&nbsp;&lt;80</div></div>
   <div class="stat"><div class="v">{_fmt(t.get('output_tokens'))}</div><div class="l">tokens written back</div><div class="d">&asymp;{_esc(t.get('fresh_to_output_ratio') or '?')} new tokens read per token written back</div></div>
-  <div class="stat"><div class="v">{_fmt(replay)}</div><div class="l">reread tool results</div></div>
-  <div class="stat"><div class="v">{t.get('sessions', 0)}</div><div class="l">sessions</div></div>
+  <div class="stat"><div class="v">{_fmt(replay)}</div><div class="l">reread tool results</div><div class="d">{('&asymp;' + replay_top + ' from ' + _esc(tools[0]['tool']) + ' alone') if replay_top else '&mdash;'}</div></div>
+  <div class="stat"><div class="v">{t.get('sessions', 0)}</div><div class="l">sessions</div><div class="d">across {_fmt(t.get('api_calls'))} API calls</div></div>
 </div>{delta}{two}</section>"""
 
 
@@ -327,7 +335,7 @@ def _gate_cells(run: dict[str, Any], gate_names: list[str], rid: str) -> str:
         dot_cls = "g" if state == "ok" else "b" if state == "failed" else "w" if state == "partial" else "n"
         state_txt = _GATE_STATE_LABELS.get(state or "", "not run")
         label = f"{rid} &middot; {_esc(_GATE_LABELS.get(g, g))}: {state_txt}"
-        cells += f"<td class='r'>{_dot(dot_cls, label)}</td>"
+        cells += f"<td class='c'>{_dot(dot_cls, label)}</td>"
     return cells
 
 
@@ -355,7 +363,7 @@ def _render_runs(matrix: dict[str, Any], timeline: dict[str, Any]) -> str:
     newest = max(all_ts) if all_ts else 0
 
     head = "".join(
-        f'<th class="r" title="{_esc(_GATE_LABELS.get(g, g))}">{_esc(_GATE_LABELS.get(g, g))}</th>'
+        f'<th class="c" title="Quality gate: {_esc(_GATE_LABELS.get(g, g))} — each dot = did this run pass it, from its receipt">{_esc(_GATE_LABELS.get(g, g))}</th>'
         for g in gate_names
     )
     rows = ""
@@ -390,7 +398,8 @@ def _render_runs(matrix: dict[str, Any], timeline: dict[str, Any]) -> str:
         st = e.get("status")
         icon = {"succeeded": "g", "failed": "b", "stale": "w"}.get(st, "n")
         rows += (
-            f"<tr><td class='mono'><span class='ellip' title='{_esc(rid)}'>{_esc(rid[:26])}&hellip;</span></td>"
+            f"<tr><td class='mono'><span class='ellip' title='{_esc(rid)}'>{_esc(rid[:26])}&hellip;</span>"
+            f"<span class='dim' style='font-size:11px'>&middot; not gated</span></td>"
             f"<td>{_dot(icon, f'{rid}: {st}')}{_esc(st)}</td>"
             f"{_gate_cells({}, gate_names, rid)}"
             f"<td class='r dim'>{delta_h:.1f}h ago</td></tr>"
@@ -417,11 +426,11 @@ def _render_runs(matrix: dict[str, Any], timeline: dict[str, Any]) -> str:
     )
 
     return f"""
-<h2>Runs &middot; status &amp; quality gates</h2>
-<table><tr><th>run</th><th>status</th>{head}<th class="r">recent</th></tr>{rows}</table>
+<section><h2>Runs &middot; status &amp; quality gates</h2>
+<div class="scroll-x"><table><tr><th>run</th><th>status</th>{head}<th class="r">recent</th></tr>{rows}</table></div>
 <p class="legend">{gated}/{len(runs)} runs verified &middot;
 <b class="{'good' if all_ok == gated and gated else 'warn'}">{all_ok} passed all gates</b>
-&middot; each dot = did that quality check pass for the run, from its receipt</p>{guidance}{campaign_note}"""
+&middot; each dot = did that quality check pass for the run, from its receipt</p>{guidance}{campaign_note}</section>"""
 
 
 def generate_report() -> Path:
