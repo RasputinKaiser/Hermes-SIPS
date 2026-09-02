@@ -22,6 +22,12 @@ from typing import Any, Sequence
 from sips_paths import goal_state_path, hook_events_path
 from sips_runtime.campaign_fleet import CampaignFleet, campaign_markdown
 
+try:
+    from inline_widget import widget_markdown, widget_payload
+except ImportError:  # widget renderer is an optional presentation surface
+    widget_payload = None
+    widget_markdown = None
+
 UNKNOWN_PLUGIN_VERSION = "0.0.0"
 SIPS_PLUGIN_ID = "harness-self-improvement@harness-local"
 STDIO_MODE = "framed"
@@ -81,6 +87,20 @@ TEXT_PROPERTY = {"type": "string", "description": "Short text input for the acti
 
 
 TOOLS: list[dict[str, Any]] = [
+    {
+        "name": "homebase_show_inline_widget",
+        "title": "SIPS Inline Widget",
+        "description": "Render a compact HTML widget from live SIPS state for inline chat delivery via the host ::preview directive. Returns the directive to put on its own line in the reply.",
+        "inputSchema": object_schema(
+            {
+                "kind": {
+                    "type": "string",
+                    "description": "Widget kind: one of the inline renderer's kinds (board, lifecycle, memory, selfloop, fleet).",
+                },
+            }
+        ),
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False},
+    },
     {
         "name": "homebase_status",
         "title": "SIPS Homebase Status",
@@ -730,6 +750,18 @@ def repo_map_payload(root: Path, write_set: list[str]) -> dict[str, Any]:
 
 def should_ignore(path: Path) -> bool:
     return any(part in IGNORE_DIRS for part in path.parts)
+
+
+def widget_tool_payload(root: Path, kind: str) -> dict[str, Any]:
+    """Delegate to the inline-widget renderer; fail closed if it is unavailable."""
+    if widget_payload is None or widget_markdown is None:
+        raise JsonRpcError(-32000, "inline widget renderer unavailable (inline_widget.py missing)")
+    if not kind:
+        raise JsonRpcError(-32602, "kind is required")
+    try:
+        return widget_payload(kind)
+    except KeyError as exc:
+        raise JsonRpcError(-32602, f"unknown widget kind: {kind}") from exc
 
 
 def context_scan_payload(root: Path, patterns: list[str], limit: int, max_bytes: int) -> dict[str, Any]:
@@ -2387,6 +2419,10 @@ def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     if name == "homebase_repo_map":
         payload = repo_map_payload(root, safe_strings(arguments.get("write_set")))
         return tool_result(payload, render(payload, "Harness Homebase Repo Map"))
+    if name == "homebase_show_inline_widget":
+        kind = str(arguments.get("kind") or "").strip()
+        payload = widget_tool_payload(root, kind)
+        return tool_result(payload, widget_markdown(payload))
     if name == "homebase_context_scan":
         payload = context_scan_payload(
             root,
