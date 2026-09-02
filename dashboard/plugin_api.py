@@ -752,6 +752,82 @@ def get_widgets() -> dict[str, Any]:
     }
 
 
+@router.get("/overview-strip")
+def get_overview_strip() -> dict[str, Any]:
+    """Composed at-a-glance row for the overview tab (read-only).
+
+    Calls the four existing bounded lens functions — goal, fleet, verdicts,
+    memory — and wraps each leg so a failure in one degrades that leg only.
+    No new state reads happen here; freshness matches the tab cards' sources.
+    """
+    claim_boundary = (
+        "Composed from the same bounded lenses as the tab cards; freshness per leg."
+    )
+
+    def _leg(note_prefix: str, fn, **kwargs) -> dict[str, Any]:
+        try:
+            return fn(**kwargs)
+        except Exception as exc:  # noqa: BLE001 - one leg must never sink the strip
+            return {"available": False, "note": f"{note_prefix} unavailable: {type(exc).__name__}"}
+
+    goal = _leg("Goal", _goal_summary)
+    if goal.get("available"):
+        subtasks = goal.get("subtasks") or {}
+        total = int(subtasks.get("total") or 0)
+        done = int(subtasks.get("done") or 0)
+        goal = {**goal, "progress_pct": round(100 * done / total) if total else 0}
+    memory = _leg("Memory", _memory_summary)
+
+    fleet_raw = _leg("Fleet", get_fleet)
+    if fleet_raw.get("available"):
+        campaigns = fleet_raw.get("campaigns") or []
+        statuses: dict[str, int] = {}
+        for campaign in campaigns:
+            status = str(campaign.get("status") or "unknown")
+            statuses[status] = statuses.get(status, 0) + 1
+        fleet = {
+            "available": True,
+            "total": int(fleet_raw.get("total") or len(campaigns)),
+            "statuses": statuses,
+        }
+    else:
+        fleet = {"available": False, "note": fleet_raw.get("reason") or fleet_raw.get("note") or "Fleet unavailable."}
+
+    def _verdicts_leg() -> dict[str, Any]:
+        from tool_latency import verdicts_payload
+
+        payload = verdicts_payload(window_hours=24)
+        if not payload.get("available"):
+            return {
+                "available": False,
+                "note": payload.get("note") or "Verdicts unavailable in the last 24h window.",
+            }
+        verdicts = payload.get("verdicts") or []
+        if not verdicts:
+            return {"available": False, "note": "No tool verdicts recorded in the last 24h."}
+        rank = {"denied": 0, "stalled": 1, "slow": 2, "ok": 3}
+        worst = min(verdicts, key=lambda v: rank.get(str(v.get("verdict")), 4))
+        return {
+            "available": True,
+            "worst_tool": worst.get("tool"),
+            "worst_verdict": worst.get("verdict"),
+            "calls_in_window": sum(int(v.get("calls") or 0) for v in verdicts),
+        }
+
+    verdicts = _leg("Verdicts", _verdicts_leg)
+
+    legs = (goal, fleet, verdicts, memory)
+    return {
+        "schema": "sips.overview-strip.v1",
+        "available": any(leg.get("available") for leg in legs),
+        "goal": goal,
+        "fleet": fleet,
+        "verdicts": verdicts,
+        "memory": memory,
+        "claim_boundary": claim_boundary,
+    }
+
+
 def _report_path() -> Path:
     """Resolve the newest SIPS report location (monkeypatch seam for tests)."""
     try:
