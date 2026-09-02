@@ -369,7 +369,10 @@ const styles = {
   widgetChip: { display: 'inline-flex', alignItems: 'center', gap: '6px', minHeight: '30px', padding: '0 12px', border: `1px solid ${COLORS.border}`, borderRadius: '999px', background: 'rgba(0,0,0,0.08)', color: COLORS.text, fontSize: '12px', cursor: 'pointer' },
   widgetChipDisabled: { color: COLORS.muted, cursor: 'default', opacity: 0.7 },
   widgetChipCopied: { borderColor: COLORS.good, color: COLORS.good },
-  stripGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '8px' }
+  stripGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '8px' },
+  segRow: { display: 'inline-flex', gap: '4px' },
+  segBtn: { minHeight: '24px', padding: '0 9px', border: `1px solid ${COLORS.border}`, borderRadius: '999px', background: 'transparent', color: COLORS.muted, fontSize: '11px', cursor: 'pointer', fontVariantNumeric: 'tabular-nums' },
+  segBtnActive: { background: 'rgba(125,211,252,0.14)', borderColor: COLORS.accent, color: COLORS.text }
 }
 
 // Adaptive polling: hidden windows and background panes don't need live data,
@@ -3266,24 +3269,47 @@ function TimelineCard({ api }) {
   })
 }
 
-// Verdict lens: per-tool call outcomes from GET /verdicts?window_hours=24.
+// Verdict lens: per-tool call outcomes from GET /verdicts?window_hours=N.
 // One row per tool: icon, truncated name, call count, a verdict pill colored
 // ok->good / slow->warn / stalled->bad / denied->bad, and p95/median durations
 // via formatMs. Backend sorts worst-first, so payload order is preserved.
+// /tool-latency carries aggregates only (no per-event rows), so instead of a
+// drill-down the card offers a window_hours selector (1h/6h/24h/7d); the
+// window is part of the useQuery key so each cadence caches separately.
 const VERDICT_TONE = { ok: 'good', slow: 'warn', stalled: 'bad', denied: 'bad' }
+const VERDICT_WINDOWS = [
+  { label: '1h', hours: 1 },
+  { label: '6h', hours: 6 },
+  { label: '24h', hours: 24 },
+  { label: '7d', hours: 168 }
+]
+
+// Segmented window selector rendered in the card title row (Card `actions`).
+function verdictWindowSelector(windowHours, setWindowHours) {
+  return jsx('div', { style: styles.segRow, role: 'group', 'aria-label': 'Verdict window', children: VERDICT_WINDOWS.map((option) => jsxs('button', {
+    type: 'button',
+    'aria-pressed': windowHours === option.hours,
+    onClick: () => setWindowHours(option.hours),
+    style: { ...styles.segBtn, ...(windowHours === option.hours ? styles.segBtnActive : {}) },
+    children: option.label
+  }, `verdict-window-${option.label}`)) })
+}
 
 function VerdictsCard({ api }) {
-  const query = useQuery({ queryKey: ['sips', 'verdicts'], queryFn: () => api.rest('/verdicts?window_hours=24'), refetchInterval: pollInterval(45000) })
+  const [windowHours, setWindowHours] = useState(24)
+  const query = useQuery({ queryKey: ['sips', 'verdicts', windowHours], queryFn: () => api.rest(`/verdicts?window_hours=${windowHours}`), refetchInterval: pollInterval(45000) })
   const title = 'Tool verdicts'
   const icon = 'checklist'
+  const windowLabel = (VERDICT_WINDOWS.find((option) => option.hours === windowHours) || {}).label || `${windowHours}h`
 
   if (query.isLoading) {
-    return jsx(Card, { title, icon, children: jsx('div', { style: styles.unavailable, children: 'Reading tool verdicts…' }) })
+    return jsx(Card, { title, icon, actions: verdictWindowSelector(windowHours, setWindowHours), children: jsx('div', { style: styles.unavailable, children: 'Reading tool verdicts…' }) })
   }
   if (query.isError) {
     return jsx(Card, {
       title,
       icon,
+      actions: verdictWindowSelector(windowHours, setWindowHours),
       hint: 'Backed by the agent hook stream.',
       children: jsx('div', { style: styles.unavailable, children: 'The verdicts endpoint is unavailable right now. Retry from the header refresh.' })
     })
@@ -3294,15 +3320,17 @@ function VerdictsCard({ api }) {
     return jsx(Card, {
       title,
       icon,
+      actions: verdictWindowSelector(windowHours, setWindowHours),
       hint: 'Backed by the agent hook stream.',
-      children: jsx('div', { style: styles.unavailable, children: 'No tool calls in the window yet.' })
+      children: jsx('div', { style: styles.unavailable, children: `No tool calls in the ${windowLabel} window yet.` })
     })
   }
 
   return jsx(Card, {
     title,
     icon,
-    hint: `${compactNumber(verdicts.length)} tool${verdicts.length === 1 ? '' : 's'} · ${query.data.window_hours}h window · worst first`,
+    actions: verdictWindowSelector(windowHours, setWindowHours),
+    hint: `${compactNumber(verdicts.length)} tool${verdicts.length === 1 ? '' : 's'} · ${windowLabel} window · worst first`,
     children: jsx('div', { style: { display: 'grid', gap: '7px' }, children: verdicts.map((entry) => {
       const pillColor = COLORS[VERDICT_TONE[entry.verdict]] || COLORS.muted
       const denials = Number(entry.denials) || 0
