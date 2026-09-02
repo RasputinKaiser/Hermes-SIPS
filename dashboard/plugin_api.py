@@ -1301,6 +1301,14 @@ def get_runs() -> dict[str, Any]:
         "active": active_runs,
         "runs": runs_out,
         "generated_at": _now(),
+        **(
+            {}
+            if runs_out
+            else {
+                "empty_note": "No session runs yet — each Hermes session writes one "
+                "runtime run; history appears after the first graph-runtime session."
+            }
+        ),
         "claim_boundary": "Run summaries derive from event streams; task results live in the runtime, not here.",
     }
 

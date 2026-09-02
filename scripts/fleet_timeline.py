@@ -132,6 +132,14 @@ def timeline_payload(limit: int = _MAX_ENTRIES) -> dict[str, Any]:
         "total_tracked": len(entries),
         "window_hours": _window_hours(shown),
         "generated_at": _now(),
+        **(
+            {}
+            if shown
+            else {
+                "empty_note": "No timeline entries yet — runs appear once sessions write "
+                "runtime events and campaigns are created."
+            }
+        ),
         "claim_boundary": (
             "Timeline is a bounded read-only merge of runtime run mtimes and fleet "
             "campaign metadata. No event payloads or campaign bodies are included."
