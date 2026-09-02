@@ -139,6 +139,23 @@ def _workspace_root() -> str:
         return os.getcwd()
 
 
+def _command_widget(homebase: Any, raw: str) -> str:
+    """Render one SIPS inline widget and return its ::preview directive.
+
+    The directive must sit on its own line so the desktop renders the widget
+    file inline; everything else in the reply is a short lead-in.
+    """
+    kind = (raw or "").strip().split()[0] if (raw or "").strip() else "board"
+    try:
+        payload = _structured_of(homebase, "homebase_show_inline_widget", {"kind": kind})
+    except Exception as exc:
+        return f"SIPS widget '{kind}' unavailable: {type(exc).__name__}"
+    directive = str(payload.get("directive") or "")
+    if payload.get("ok") is True and directive:
+        return f"SIPS {kind} widget (static render — refresh by re-running /sips-widget {kind}):\n{directive}"
+    return f"SIPS widget '{kind}' unavailable: {payload.get('error') or payload.get('reason') or 'renderer returned no directive'}"
+
+
 def _command_status(homebase: Any, _raw: str) -> str:
     return _card_result(homebase, "homebase_status", {"root": str(_PLUGIN_ROOT)}, _cards.status_card)
 
@@ -461,7 +478,7 @@ def _register_skills(ctx: Any) -> None:
 
 def _register_commands(ctx: Any, homebase: Any) -> None:
     direct = {
-        "sips": (lambda raw: "SIPS commands: /sips-status, /sips-routes, /sips-recall, /sips-goal, /sips-verify, /sips-record, /sips-usage, /sips-report, /sips-gates, /sips-quality, /sips-latency, /sips-lifecycle, /sips-freshness, /sips-audit, /selfloop", "Show Hermes SIPS command help", "[help]"),
+        "sips": (lambda raw: "SIPS commands: /sips-status, /sips-routes, /sips-recall, /sips-goal, /sips-verify, /sips-record, /sips-usage, /sips-report, /sips-widget, /sips-gates, /sips-quality, /sips-latency, /sips-lifecycle, /sips-freshness, /sips-audit, /selfloop", "Show Hermes SIPS command help", "[help]"),
         "sips-status": (partial(_command_status, homebase), "Inspect SIPS Homebase source status", ""),
         "sips-routes": (partial(_command_routes, homebase), "List SIPS Homebase routes", ""),
         "sips-recall": (partial(_command_recall, homebase), "Search scoped SIPS memory", "<query>"),
@@ -470,6 +487,7 @@ def _register_commands(ctx: Any, homebase: Any) -> None:
         "sips-record": (partial(_command_record, homebase), "Record a bounded SIPS learning", "<title> :: <body>"),
         "sips-usage": (partial(_command_usage, homebase), "Show LLM token usage lens (days 1-30, default 7)", "[days]"),
         "sips-report": (partial(_command_report, homebase), "Generate the SIPS Control Report (visual HTML dashboard)", ""),
+        "sips-widget": (partial(_command_widget, homebase), "Render a SIPS inline widget in chat (board|lifecycle|memory|selfloop|fleet)", "[kind]"),
         "sips-gates": (partial(_command_gates, homebase), "Show gate-evidence matrix for recent runs", ""),
         "sips-scan": (partial(_command_context_scan, homebase), "Scan cwd for oversized context risks + bounded reads", "[path]"),
         "sips-distill": (partial(_command_distill, homebase), "Distill bounded excerpts from a file", "<path> :: <query>"),
