@@ -364,7 +364,11 @@ const styles = {
   childStatusOptionCurrent: { color: COLORS.muted, cursor: 'default' },
   childStatusOptionDanger: { color: COLORS.bad },
   memoryFilters: { display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' },
-  memoryMatched: { color: COLORS.muted, fontSize: '12px', fontVariantNumeric: 'tabular-nums', marginTop: '6px' }
+  memoryMatched: { color: COLORS.muted, fontSize: '12px', fontVariantNumeric: 'tabular-nums', marginTop: '6px' },
+  widgetChips: { display: 'flex', flexWrap: 'wrap', gap: '8px' },
+  widgetChip: { display: 'inline-flex', alignItems: 'center', gap: '6px', minHeight: '30px', padding: '0 12px', border: `1px solid ${COLORS.border}`, borderRadius: '999px', background: 'rgba(0,0,0,0.08)', color: COLORS.text, fontSize: '12px', cursor: 'pointer' },
+  widgetChipDisabled: { color: COLORS.muted, cursor: 'default', opacity: 0.7 },
+  widgetChipCopied: { borderColor: COLORS.good, color: COLORS.good }
 }
 
 // Adaptive polling: hidden windows and background panes don't need live data,
@@ -3371,6 +3375,71 @@ function ReportStatusCard({ api }) {
   })
 }
 
+// Inline-widget strip: one chip per widget kind from GET /widgets — the kinds
+// list comes from the backend probe, never hardcoded here. A chip runs
+// '/sips-widget <kind>' in chat via the host bridge when present; without the
+// bridge it copies the command with a short 'Copied' flash (same idiom as
+// ReportStatusCard). Top-level available:false renders the note, no chips.
+function WidgetStripCard({ api }) {
+  const query = useQuery({ queryKey: ['sips-control-plane', 'widgets'], queryFn: () => api.rest('/widgets'), refetchInterval: pollInterval(60000) })
+  const [copiedKind, setCopiedKind] = useState(null)
+  const title = 'Widget strip'
+  const icon = 'layers'
+
+  const runKind = (kind) => {
+    const command = `/sips-widget ${kind}`
+    if (window.hermes && typeof window.hermes.send === 'function') {
+      window.hermes.send(command)
+      return
+    }
+    if (!navigator.clipboard?.writeText) return
+    navigator.clipboard.writeText(command).then(() => {
+      setCopiedKind(kind)
+      setTimeout(() => setCopiedKind((current) => (current === kind ? null : current)), 1500)
+    }).catch(() => { /* clipboard unavailable — chip still shows the command */ })
+  }
+
+  if (query.isLoading) {
+    return jsx(Card, { title, icon, children: jsx('div', { style: styles.unavailable, children: 'Probing widget kinds…' }) })
+  }
+  if (query.isError || !query.data?.available) {
+    return jsx(Card, {
+      title,
+      icon,
+      hint: 'Inline widgets render on demand in chat via /sips-widget.',
+      children: jsx('div', { style: styles.unavailable, children: query.data?.note || 'The widgets endpoint is unavailable right now. Retry from the header refresh.' })
+    })
+  }
+
+  const data = query.data
+  const kinds = Array.isArray(data.kinds) ? data.kinds : []
+  const briefFor = (kind) => (Array.isArray(data.widgets) ? data.widgets : []).find((brief) => brief.kind === kind)
+
+  return jsx(Card, {
+    title,
+    icon,
+    hint: `${compactNumber(kinds.length)} widget kind${kinds.length === 1 ? '' : 's'} · rendered on demand in chat`,
+    children: [
+      jsx('div', { style: styles.widgetChips, children: kinds.map((kind) => {
+        const brief = briefFor(kind)
+        const available = brief ? brief.available !== false : true
+        const copied = copiedKind === kind
+        return jsxs('button', {
+          type: 'button',
+          disabled: !available,
+          onClick: () => runKind(kind),
+          style: { ...styles.widgetChip, ...(!available ? styles.widgetChipDisabled : {}), ...(copied ? styles.widgetChipCopied : {}) },
+          children: [
+            jsx(Codicon, { name: 'window', size: '0.8rem' }),
+            copied ? 'Copied' : `/sips-widget ${kind}`
+          ]
+        }, `widget-${kind}`)
+      }) }),
+      data.claim_boundary ? jsx('div', { style: { color: COLORS.muted, fontSize: '11px', marginTop: '10px' }, children: data.claim_boundary }) : null
+    ]
+  })
+}
+
 function EventsCard({ events }) {
   const [filter, setFilter] = useState('all')
   const [expanded, setExpanded] = useState(false)
@@ -3829,6 +3898,7 @@ function Dashboard({ api }) {
           jsx(MemoryBrowser, { api }),
           jsx(MemoryCard, { memory: data.memory }),
           jsx(SurfaceCard, { counts, lifecycle: data.lifecycle, onOpenActivity: () => switchTab('activity') }),
+          jsx(WidgetStripCard, { api }),
           jsx(ContextScanCard, { api })
         ] })
       ] }) : null,
