@@ -706,6 +706,52 @@ def get_report_status() -> dict[str, Any]:
     }
 
 
+@router.get("/widgets")
+def get_widgets() -> dict[str, Any]:
+    """Inline-widget availability lens for the panel's WidgetStripCard (read-only).
+
+    Lists the widget kinds the inline renderer can produce and probes each one
+    cheaply (no HTML is rendered or served here — widgets render via the
+    /sips-widget chat command backed by homebase_show_inline_widget).
+    """
+    claim_boundary = (
+        "Availability probe only; widget HTML is rendered on demand in chat, "
+        "not fetched here. Widgets are static renders of SIPS state at fetch time."
+    )
+    try:
+        from inline_widget import widget_brief, widget_kinds
+    except Exception as exc:  # noqa: BLE001 - missing renderer must not 500
+        return {
+            "schema": "sips.widgets.v1",
+            "available": False,
+            "kinds": [],
+            "widgets": [],
+            "note": f"Inline widget renderer unavailable (inline_widget.py missing: {exc}).",
+            "claim_boundary": claim_boundary,
+        }
+    try:
+        kinds = widget_kinds()
+        widgets = [widget_brief(kind) for kind in kinds]
+    except Exception as exc:  # noqa: BLE001 - probe failure must not 500
+        return {
+            "schema": "sips.widgets.v1",
+            "available": False,
+            "kinds": [],
+            "widgets": [],
+            "note": f"Widget probe failed: {exc}",
+            "claim_boundary": claim_boundary,
+        }
+    available = any(w.get("available") for w in widgets)
+    return {
+        "schema": "sips.widgets.v1",
+        "available": available,
+        "kinds": kinds,
+        "widgets": widgets,
+        "note": None if available else "No widget kind is renderable right now.",
+        "claim_boundary": claim_boundary,
+    }
+
+
 def _report_path() -> Path:
     """Resolve the newest SIPS report location (monkeypatch seam for tests)."""
     try:
