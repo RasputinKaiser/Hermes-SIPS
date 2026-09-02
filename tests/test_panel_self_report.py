@@ -64,12 +64,18 @@ def test_drift_detects_newer_repo_files(fake_repo: Path, tmp_path: Path) -> None
     monkey_like_deployed = [("dashboard/plugin_api.py", deployed / "plugin_api.py")]
     drift = psr._drift_map(fake_repo, monkey_like_deployed)
     assert drift["dashboard/plugin_api.py"] is False
-    # Now bump the repo copy's mtime.
+    # Identical content with a newer mtime is NOT drift (rsync -a keeps mtimes
+    # only to whole seconds, so mtime comparison false-positives on equal files).
     import os
     import time
 
     newer = time.time() + 10
     os.utime(fake_repo / "dashboard" / "plugin_api.py", (newer, newer))
+    drift = psr._drift_map(fake_repo, monkey_like_deployed)
+    assert drift["dashboard/plugin_api.py"] is False
+    # Different content is drift even when the deployed copy has a newer mtime.
+    time.sleep(0.01)
+    (deployed / "plugin_api.py").write_text("# stale deployed copy\n", encoding="utf-8")
     drift = psr._drift_map(fake_repo, monkey_like_deployed)
     assert drift["dashboard/plugin_api.py"] is True
 

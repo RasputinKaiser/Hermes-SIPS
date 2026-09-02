@@ -82,16 +82,21 @@ def _gate(name: str) -> bool:
 
 
 def _drift_map(repo: Path, watched: list[tuple[str, Path]] | None = None) -> dict[str, bool]:
-    """repo-relative -> True when the repo copy is newer than the deployed twin."""
+    """repo-relative -> True when the deployed twin's content differs from the repo copy.
+
+    Content-based, not mtime-based: rsync -a preserves mtimes only to whole-second
+    precision, so comparing mtimes false-positives on byte-identical files whose
+    sub-second components differ.
+    """
     drift: dict[str, bool] = {}
     for rel, deployed in watched or _WATCHED:
+        repo_file = repo / rel
         try:
-            repo_stat = (repo / rel).stat()
+            repo_bytes = repo_file.read_bytes()
         except OSError:
             continue
         try:
-            deployed_stat = deployed.stat()
-            drift[rel] = repo_stat.st_mtime > deployed_stat.st_mtime
+            drift[rel] = deployed.read_bytes() != repo_bytes
         except OSError:
             drift[rel] = True  # deployed twin missing entirely
     return drift
