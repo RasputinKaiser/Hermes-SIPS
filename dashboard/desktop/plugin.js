@@ -368,7 +368,8 @@ const styles = {
   widgetChips: { display: 'flex', flexWrap: 'wrap', gap: '8px' },
   widgetChip: { display: 'inline-flex', alignItems: 'center', gap: '6px', minHeight: '30px', padding: '0 12px', border: `1px solid ${COLORS.border}`, borderRadius: '999px', background: 'rgba(0,0,0,0.08)', color: COLORS.text, fontSize: '12px', cursor: 'pointer' },
   widgetChipDisabled: { color: COLORS.muted, cursor: 'default', opacity: 0.7 },
-  widgetChipCopied: { borderColor: COLORS.good, color: COLORS.good }
+  widgetChipCopied: { borderColor: COLORS.good, color: COLORS.good },
+  stripGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '8px' }
 }
 
 // Adaptive polling: hidden windows and background panes don't need live data,
@@ -3440,6 +3441,96 @@ function WidgetStripCard({ api }) {
   })
 }
 
+// At-a-glance strip: one useQuery to GET /overview-strip, four compact
+// Signals (goal posture, fleet, worst tool, memory). Each leg degrades
+// independently on the backend — a leg with available:false renders its note
+// as muted text instead of fake zeros; the panel never invents 0 counts.
+function OverviewStripCard({ api }) {
+  const query = useQuery({ queryKey: ['sips-control-plane', 'overview-strip'], queryFn: () => api.rest('/overview-strip'), refetchInterval: pollInterval(60000) })
+  const title = 'At a glance'
+  const icon = 'pulse'
+
+  if (query.isLoading) {
+    return jsx(Card, { title, icon, children: jsx('div', { style: styles.unavailable, children: 'Composing the glance strip…' }) })
+  }
+  if (query.isError) {
+    return jsx(Card, {
+      title,
+      icon,
+      hint: 'Composed from the same bounded lenses as the tab cards.',
+      children: jsx('div', { style: styles.unavailable, children: 'The overview-strip endpoint is unavailable right now. Retry from the header refresh.' })
+    })
+  }
+
+  const strip = query.data || {}
+  const legs = []
+
+  const goal = strip.goal
+  if (goal?.available) {
+    const subtasks = goal.subtasks || {}
+    legs.push(jsx(Signal, {
+      key: 'goal',
+      label: 'Goal posture',
+      value: formatStatus(goal.status),
+      detail: `${Number(goal.progress_pct) || 0}% of subtasks done${subtasks.total ? ` (${compactNumber(subtasks.done)}/${compactNumber(subtasks.total)})` : ''}`,
+      tone: toneFor(goal.status) === 'good' ? 'good' : 'warn',
+      progress: Number(goal.progress_pct) || 0
+    }))
+  } else {
+    legs.push(jsx('div', { key: 'goal', style: styles.unavailable, children: goal?.note || 'No active goal.' }))
+  }
+
+  const fleet = strip.fleet
+  if (fleet?.available) {
+    const statuses = Object.entries(fleet.statuses || {})
+    legs.push(jsx(Signal, {
+      key: 'fleet',
+      label: 'Fleet',
+      value: compactNumber(fleet.total),
+      detail: statuses.length ? statuses.map(([status, count]) => `${count} ${status}`).join(' · ') : 'no campaigns',
+      tone: 'accent'
+    }))
+  } else {
+    legs.push(jsx('div', { key: 'fleet', style: styles.unavailable, children: fleet?.note || 'Fleet unavailable right now.' }))
+  }
+
+  const verdicts = strip.verdicts
+  if (verdicts?.available) {
+    legs.push(jsx(Signal, {
+      key: 'verdicts',
+      label: 'Worst tool',
+      value: String(verdicts.worst_tool || 'unknown').slice(0, 24),
+      detail: `${formatStatus(verdicts.worst_verdict)} · ${compactNumber(verdicts.calls_in_window)} calls in window`,
+      tone: VERDICT_TONE[verdicts.worst_verdict] || 'muted'
+    }))
+  } else {
+    legs.push(jsx('div', { key: 'verdicts', style: styles.unavailable, children: verdicts?.note || 'Verdicts unavailable right now.' }))
+  }
+
+  const memory = strip.memory
+  if (memory?.available) {
+    const recordCount = Number(memory.record_count) || 0
+    const verified = Number(memory.verified_or_active_count) || 0
+    legs.push(jsx(Signal, {
+      key: 'memory',
+      label: 'Memory',
+      value: compactNumber(recordCount),
+      detail: `${compactNumber(verified)} verified/active`,
+      tone: 'good',
+      progress: recordCount ? percent(verified, recordCount) : 0
+    }))
+  } else {
+    legs.push(jsx('div', { key: 'memory', style: styles.unavailable, children: memory?.note || memory?.reason || 'Memory fabric unavailable right now.' }))
+  }
+
+  return jsx(Card, {
+    title,
+    icon,
+    hint: strip.claim_boundary || 'Composed from the same bounded lenses as the tab cards; freshness per leg.',
+    children: jsx('div', { style: styles.stripGrid, children: legs })
+  })
+}
+
 function EventsCard({ events }) {
   const [filter, setFilter] = useState('all')
   const [expanded, setExpanded] = useState(false)
@@ -3889,6 +3980,7 @@ function Dashboard({ api }) {
       // supporting cards subordinate below. Squint test: one lead per tab.
       activeTab === 'overview' ? jsxs('div', { children: [
         jsx('div', { style: styles.leadRow, children: jsx(GoalBoardCard, { api }) }),
+        jsx('div', { style: styles.leadRow, children: jsx(OverviewStripCard, { api }) }),
         jsx('div', { style: styles.supportGrid, children: [
           jsx(GoalCard, { goal: data.goal, api, selfloop: selfloopQuery.data, onSelfloopMutated: () => selfloopQuery.refetch() }),
           jsx(RuntimeCard, { api }),
