@@ -737,7 +737,7 @@ function Signal({ label, value, detail, tone = 'accent', progress, trend, trendU
       jsx('div', { style: styles.signalDetail, title: detail, children: detail }),
       progress === undefined ? null : jsx('div', {
         style: styles.signalTrack,
-        children: jsx('div', { style: { ...styles.miniFill, width: `${progress}%`, background: color } })
+        children: jsx('div', { style: { ...styles.miniFill, background: color, transform: `scaleX(${Math.max(0, Math.min(1, (Number(progress) || 0) / 100))})` } })
       }),
       trend ? jsx('div', { title: trendLabel(trend, trendUnit), children: jsx(Sparkline, { values: trend, color }) }) : null
     ]
