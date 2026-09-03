@@ -1756,7 +1756,7 @@ function RuntimeCard({ api }) {
           children: jsx('div', { style: { height: '100%', width: `${spendRatio}%`, borderRadius: '999px', background: COLORS[spendTone], opacity: 0.8 } })
         }),
         overTranche && trancheLimits.length > (Number(budget.released_tranches) || 1) ? jsx('div', { style: { ...styles.label, fontSize: '10px', color: COLORS.warn }, children: `Soft budget exceeded — next tranche releases at ${fmtCompact(trancheLimits[Math.min(Number(budget.released_tranches) || 1, trancheLimits.length)])}` }) : null,
-        budget.soft_exceeded ? jsx('div', { style: { ...styles.label, fontSize: '10px', color: COLORS.warn }, children: 'Soft limit exceeded — expansion events gated until a new tranche releases' }) : null,
+        budget.soft_exceeded ? jsx('div', { style: { ...styles.label, fontSize: '10px', color: COLORS.warn }, children: 'Reservation exceeds soft limit — charged at lease time, nothing is gated; tranches release on demand' }) : null,
         resourceRows.length ? jsx('div', { style: { display: 'grid', gap: '4px', marginTop: '4px' }, children: resourceRows.map((row) => jsx('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '10px' }, children: [
           jsx('span', { style: { fontSize: '11px', fontFamily: 'ui-monospace, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: formatStatus(row.key) }),
           jsxs('span', { style: { flexShrink: 0, fontSize: '11px', fontVariantNumeric: 'tabular-nums', color: row.used / row.limit >= 0.9 ? COLORS.warn : COLORS.muted }, children: [
