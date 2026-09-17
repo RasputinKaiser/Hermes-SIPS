@@ -1,0 +1,9 @@
+{
+  "id": "transcript_sequence_correct_order",
+  "prompt": "read then write a file",
+  "grading": [
+    {"kind": "transcriptSequence", "arguments": {"first": "Read", "before": "Edit|Write"}, "weight": 1}
+  ],
+  "sandboxFiles": {},
+  "toolSequence": ["Read", "Write"]
+}

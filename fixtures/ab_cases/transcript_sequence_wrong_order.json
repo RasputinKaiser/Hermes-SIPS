@@ -1,0 +1,9 @@
+{
+  "id": "transcript_sequence_wrong_order",
+  "prompt": "write before reading a file",
+  "grading": [
+    {"kind": "transcriptSequence", "arguments": {"first": "Read", "before": "Edit|Write"}, "weight": 1}
+  ],
+  "sandboxFiles": {},
+  "toolSequence": ["Write", "Read"]
+}

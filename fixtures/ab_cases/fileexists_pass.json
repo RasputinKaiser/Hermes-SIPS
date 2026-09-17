@@ -1,0 +1,9 @@
+{
+  "id": "fileexists_pass",
+  "prompt": "create hello.txt",
+  "grading": [
+    {"kind": "fileExists", "arguments": {"path": "hello.txt"}, "weight": 1}
+  ],
+  "sandboxFiles": {"hello.txt": "hello world"},
+  "toolSequence": ["Write"]
+}

@@ -24,15 +24,42 @@ const API_STATUS = '/status'
 const API_ACTIONS = '/actions'
 
 const COLORS = {
-  accent: 'var(--ui-accent, #7dd3fc)',
-  good: 'var(--ui-success, #69d39a)',
-  warn: 'var(--ui-warning, #f4c76b)',
-  bad: 'var(--ui-danger, #f28b8b)',
-  muted: 'var(--ui-text-tertiary, #98a2b3)',
-  text: 'var(--ui-text-primary, #eef2f7)',
-  panel: 'var(--ui-surface-raised, rgba(255,255,255,0.045))',
-  border: 'var(--ui-border, rgba(255,255,255,0.10))'
+  // --- THE BOARD palette -----------------------------------------------------
+  // Matte flap faces, steel chassis, letter white. Exactly two semantic hues
+  // (amber = attention/delay, red = failure) plus a live green reserved for
+  // lamps only. No decorative accent: amber is the active/attention color.
+  ink: '#0b0d10',
+  flap: '#0d0e11',
+  flapRaised: '#131519',
+  chassis: '#16181d',
+  chassisDeep: '#101215',
+  seam: 'rgba(255,255,255,0.055)',
+  frame: '#2c3037',
+  frameLight: '#43484f',
+  steel: '#9aa1ab',
+  steelDim: '#79808b',
+  letter: '#f2f2f2',
+  amber: '#ffb000',
+  amberDim: 'rgba(255,176,0,0.14)',
+  red: '#ff5a5a',
+  redDim: 'rgba(255,90,90,0.14)',
+  green: '#39d98a',
+  greenDim: 'rgba(57,217,138,0.16)',
+  // Kept for host-token fallbacks inside shared SDK components.
+  text: '#f2f2f2',
+  muted: '#8b919b',
+  border: '#2c3037',
+  panel: '#16181d',
+  accent: '#ffb000',
+  good: '#39d98a',
+  warn: '#ffb000',
+  bad: '#ff5a5a'
 }
+
+const TONE_LAMP = { good: COLORS.green, warn: COLORS.amber, bad: COLORS.red, accent: COLORS.amber, muted: COLORS.steelDim }
+
+const MONO = 'ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace'
+const COND = '"SF Pro Display", "SF Pro Text", -apple-system, "Segoe UI", system-ui, sans-serif'
 
 const styles = {
   page: {
@@ -40,341 +67,358 @@ const styles = {
     position: 'relative',
     height: '100%',
     overflow: 'auto',
-    padding: '28px 34px 48px',
-    color: COLORS.text,
-    background: 'var(--ui-surface, transparent)'
+    padding: '24px 30px 56px',
+    color: COLORS.letter,
+    background: 'radial-gradient(1100px 420px at 50% -160px, #171a20, transparent 70%), linear-gradient(180deg, #101215, #0b0d10 320px)',
+    fontFamily: COND
   },
-  max: { maxWidth: '1180px', margin: '0 auto', position: 'relative', zIndex: 1 },
-  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '20px', marginBottom: '24px' },
-  eyebrow: { color: COLORS.accent, fontSize: '12px', fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase' },
-  title: { fontSize: '28px', lineHeight: 1.15, fontWeight: 700, margin: '6px 0 8px' },
-  subtitle: { color: COLORS.muted, fontSize: '13px', lineHeight: 1.5, maxWidth: '700px' },
+  max: { maxWidth: '1240px', margin: '0 auto', position: 'relative', zIndex: 1 },
+  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '20px', marginBottom: '18px' },
+  eyebrow: { color: COLORS.amber, fontSize: '11px', fontWeight: 700, letterSpacing: '0.22em', textTransform: 'uppercase', fontFamily: MONO },
+  title: { fontSize: '26px', lineHeight: 1.1, fontWeight: 800, margin: '7px 0 7px', textTransform: 'uppercase', letterSpacing: '0.01em' },
+  subtitle: { color: COLORS.steel, fontSize: '12.5px', lineHeight: 1.55, maxWidth: '700px' },
   actions: { display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 },
   sectionGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '14px', alignItems: 'start' },
-  card: { background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: '14px', padding: '18px', marginBottom: '14px' },
-  cardTitle: { display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 650, fontSize: '14px', marginBottom: '14px' },
-  cardHint: { color: COLORS.muted, fontSize: '12px', margin: '-8px 0 14px' },
-  row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', padding: '8px 0', borderBottom: `1px solid ${COLORS.border}` },
-  rowLast: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', padding: '8px 0' },
-  label: { color: COLORS.muted, fontSize: '12px' },
-  value: { fontSize: '12px', fontWeight: 600, textAlign: 'right' },
-  objective: { fontSize: '17px', lineHeight: 1.4, fontWeight: 600, margin: '2px 0 16px' },
-  progressTrack: { height: '7px', background: 'rgba(255,255,255,0.08)', borderRadius: '999px', overflow: 'hidden', margin: '8px 0 7px' },
-  progressFill: { height: '100%', background: COLORS.good, borderRadius: '999px', transition: 'transform 200ms ease', transformOrigin: 'left center' },
-  proof: { padding: '10px 11px', border: `1px solid ${COLORS.border}`, borderRadius: '10px' },
-  proofName: { color: COLORS.muted, fontSize: '12px', marginBottom: '5px' },
-  proofList: { display: 'grid', gap: '11px' },
+  // Steel panel: the board chassis. Subtle top-light, machined edge, corner
+  // rivets come from the Card component's plate.
+  card: {
+    background: 'linear-gradient(180deg, #191c21, #131519 62%)',
+    border: '1px solid #23262c',
+    borderTopColor: '#34383f',
+    borderRadius: '10px',
+    padding: '15px 16px 14px',
+    marginBottom: '14px',
+    boxShadow: '0 1px 2px rgba(0,0,0,0.5), 0 10px 26px rgba(0,0,0,0.35)'
+  },
+  cardTitle: { display: 'flex', alignItems: 'center', gap: '9px', fontWeight: 750, fontSize: '13px', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.09em' },
+  cardHint: { color: COLORS.steelDim, fontSize: '11.5px', margin: '-7px 0 12px', lineHeight: 1.5 },
+  // Board row: ruled row on the flap field. Fixed rhythm, hairline separators.
+  row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', padding: '7px 8px', borderBottom: `1px solid ${COLORS.seam}`, background: COLORS.flap, borderRadius: '4px', marginBottom: '3px' },
+  rowLast: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', padding: '7px 8px', background: COLORS.flap, borderRadius: '4px' },
+  label: { color: COLORS.steelDim, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 650 },
+  value: { fontSize: '12px', fontWeight: 650, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: COLORS.letter },
+  objective: { fontSize: '14.5px', lineHeight: 1.45, fontWeight: 650, margin: '2px 0 14px', color: COLORS.letter },
+  progressTrack: { height: '10px', background: COLORS.flap, border: `1px solid ${COLORS.seam}`, borderRadius: '3px', overflow: 'hidden', margin: '8px 0 7px', display: 'flex' },
+  progressFill: { height: '100%', background: COLORS.amber, borderRadius: 0, transition: 'width 420ms cubic-bezier(0.2, 0.7, 0.3, 1)' },
+  proof: { padding: '10px 11px', border: `1px solid ${COLORS.seam}`, borderRadius: '6px', background: COLORS.flap },
+  proofName: { color: COLORS.steelDim, fontSize: '11px', marginBottom: '5px', textTransform: 'uppercase', letterSpacing: '0.09em' },
+  proofList: { display: 'grid', gap: '10px' },
   proofRow: { display: 'grid', gap: '6px' },
   proofRowHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' },
-  miniTrack: { height: '5px', background: 'rgba(255,255,255,0.08)', borderRadius: '999px', overflow: 'hidden' },
-  miniFill: { height: '100%', borderRadius: '999px', transition: 'transform 200ms ease', transformOrigin: 'left center' },
-  hero: { position: 'relative', overflow: 'hidden', padding: '20px 22px 16px', marginBottom: '14px', background: 'linear-gradient(135deg, rgba(125,211,252,0.13), rgba(255,255,255,0.04) 48%, rgba(105,211,154,0.08))', border: `1px solid ${COLORS.border}`, borderRadius: '18px', boxShadow: '0 18px 44px rgba(0,0,0,0.16)' },
-  heroGlow: { position: 'absolute', width: '220px', height: '220px', right: '-70px', top: '-110px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(125,211,252,0.2), transparent 70%)', pointerEvents: 'none' },
+  miniTrack: { height: '5px', background: COLORS.flap, border: `1px solid ${COLORS.seam}`, borderRadius: '2px', overflow: 'hidden' },
+  miniFill: { height: '100%', borderRadius: 0, transition: 'width 420ms cubic-bezier(0.2, 0.7, 0.3, 1)', background: COLORS.amber },
+  hero: {
+    position: 'relative', overflow: 'hidden', padding: '18px 20px 16px', marginBottom: '14px',
+    background: 'linear-gradient(180deg, #1b1e24, #121419 70%)',
+    border: '1px solid #23262c', borderTopColor: '#3a3f47', borderRadius: '10px',
+    boxShadow: '0 2px 4px rgba(0,0,0,0.55), 0 18px 40px rgba(0,0,0,0.4)'
+  },
+  heroGlow: { display: 'none' },
   heroLayout: { position: 'relative', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '24px' },
   heroIdentity: { minWidth: 0 },
-  heroTitle: { fontSize: '21px', lineHeight: 1.2, fontWeight: 700, margin: '5px 0 7px', textWrap: 'balance' },
-  heroText: { color: COLORS.muted, fontSize: '12px', lineHeight: 1.5, maxWidth: '650px', textWrap: 'pretty' },
+  heroTitle: { fontSize: '20px', lineHeight: 1.15, fontWeight: 800, margin: '5px 0 7px', textWrap: 'balance', textTransform: 'uppercase', letterSpacing: '0.01em' },
+  heroText: { color: COLORS.steel, fontSize: '12.5px', lineHeight: 1.55, maxWidth: '650px', textWrap: 'pretty' },
   heroFooter: { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginTop: '13px' },
-  updated: { color: COLORS.muted, fontSize: '12px', fontVariantNumeric: 'tabular-nums' },
+  updated: { color: COLORS.steel, fontSize: '11.5px', fontVariantNumeric: 'tabular-nums', fontFamily: MONO },
   readiness: { display: 'grid', justifyItems: 'center', gap: '6px', flexShrink: 0 },
-  readinessOrb: { width: '82px', height: '82px', display: 'grid', placeItems: 'center', borderRadius: '50%', background: 'conic-gradient(var(--ui-success, #69d39a) 0%, rgba(255,255,255,0.1) 0)', boxShadow: '0 0 28px rgba(105,211,154,0.14)' },
-  readinessOrbInner: { width: '66px', height: '66px', display: 'grid', placeItems: 'center', borderRadius: '50%', background: 'var(--ui-surface, #102b68)', textAlign: 'center' },
-  readinessValue: { fontSize: '17px', lineHeight: 1, fontWeight: 750, fontVariantNumeric: 'tabular-nums' },
-  readinessLabel: { color: COLORS.muted, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.08em', textAlign: 'center' },
-  signalGrid: { position: 'relative', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(165px, 1fr))', gap: '8px', marginTop: '18px' },
-  signal: { minWidth: 0, padding: '10px 11px', border: `1px solid ${COLORS.border}`, borderRadius: '11px', background: 'rgba(0,0,0,0.08)' },
-  signalLabel: { color: COLORS.muted, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.08em' },
-  signalValue: { fontSize: '17px', fontWeight: 700, marginTop: '4px', fontVariantNumeric: 'tabular-nums' },
-  signalDetail: { color: COLORS.muted, fontSize: '12px', marginTop: '3px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
-  signalTrack: { height: '4px', marginTop: '8px', background: 'rgba(255,255,255,0.08)', borderRadius: '999px', overflow: 'hidden' },
+  readinessOrb: { width: '86px', height: '86px', display: 'grid', placeItems: 'center', borderRadius: '50%', background: 'conic-gradient(var(--sips-orb-color, #39d98a) var(--sips-orb, 0%), #0d0e11 0)', border: '1px solid #2c3037', boxShadow: 'inset 0 2px 6px rgba(0,0,0,0.6)' },
+  readinessOrbInner: { width: '68px', height: '68px', display: 'grid', placeItems: 'center', borderRadius: '50%', background: 'radial-gradient(circle at 40% 32%, #1d2026, #0d0e11 74%)', border: '1px solid #23262c', textAlign: 'center' },
+  readinessValue: { fontSize: '17px', lineHeight: 1, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: COLORS.letter },
+  readinessLabel: { color: COLORS.steelDim, fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.12em', textAlign: 'center' },
+  signalGrid: { position: 'relative', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(165px, 1fr))', gap: '8px', marginTop: '16px' },
+  // Signal = flap counter cell: ink face, seam, tabular digits.
+  signal: { minWidth: 0, padding: '9px 11px 10px', border: `1px solid ${COLORS.seam}`, borderRadius: '5px', background: COLORS.flap, position: 'relative', overflow: 'hidden' },
+  signalLabel: { color: COLORS.steelDim, fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.13em', fontWeight: 700 },
+  signalValue: { fontSize: '18px', fontWeight: 800, marginTop: '5px', fontVariantNumeric: 'tabular-nums', color: COLORS.letter, fontFamily: MONO },
+  signalDetail: { color: COLORS.steelDim, fontSize: '11px', marginTop: '3px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+  signalTrack: { height: '4px', marginTop: '8px', background: '#08090b', border: `1px solid ${COLORS.seam}`, borderRadius: '2px', overflow: 'hidden' },
   sparkline: { display: 'block', width: '100%', height: '23px', marginTop: '7px', overflow: 'visible' },
-  freshness: { display: 'inline-flex', alignItems: 'center', gap: '6px', color: COLORS.muted, fontSize: '12px', fontVariantNumeric: 'tabular-nums' },
-  freshnessDot: { width: '6px', height: '6px', borderRadius: '50%', background: COLORS.good, boxShadow: '0 0 0 3px rgba(105,211,154,0.12)' },
-  proofDetail: { marginTop: '7px', padding: '9px 10px', borderRadius: '9px', background: 'rgba(0,0,0,0.10)', color: COLORS.muted, fontSize: '12px', lineHeight: 1.45 },
+  freshness: { display: 'inline-flex', alignItems: 'center', gap: '6px', color: COLORS.steel, fontSize: '11.5px', fontVariantNumeric: 'tabular-nums', fontFamily: MONO },
+  freshnessDot: { width: '6px', height: '6px', borderRadius: '50%', background: COLORS.green },
+  proofDetail: { marginTop: '7px', padding: '9px 10px', borderRadius: '5px', background: '#0b0c0f', color: COLORS.steel, fontSize: '11.5px', lineHeight: 1.5, border: `1px solid ${COLORS.seam}` },
   proofSummary: { cursor: 'pointer', listStyle: 'none' },
   eventToolbar: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '4px' },
-  select: { minHeight: '32px', padding: '0 28px 0 9px', border: `1px solid ${COLORS.border}`, borderRadius: '8px', background: 'rgba(0,0,0,0.12)', color: COLORS.text, fontSize: '12px' },
-  filterCount: { color: COLORS.muted, fontSize: '12px', fontVariantNumeric: 'tabular-nums' },
+  select: { minHeight: '30px', padding: '0 26px 0 9px', border: `1px solid ${COLORS.frame}`, borderRadius: '4px', background: COLORS.flap, color: COLORS.letter, fontSize: '11.5px', fontFamily: MONO },
+  filterCount: { color: COLORS.steelDim, fontSize: '11.5px', fontVariantNumeric: 'tabular-nums' },
   actionGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '8px' },
-  action: { display: 'grid', gap: '8px', padding: '11px', border: `1px solid ${COLORS.border}`, borderRadius: '10px', background: 'rgba(0,0,0,0.08)' },
-  actionTitle: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: 650 },
-  actionDescription: { color: COLORS.muted, fontSize: '12px', lineHeight: 1.4 },
+  action: { display: 'grid', gap: '8px', padding: '11px', border: `1px solid ${COLORS.seam}`, borderRadius: '6px', background: COLORS.flap },
+  actionTitle: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' },
+  actionDescription: { color: COLORS.steel, fontSize: '11.5px', lineHeight: 1.5 },
   actionButton: { minHeight: '40px', justifySelf: 'start' },
-  actionResult: { marginTop: '10px', padding: '10px', borderRadius: '9px', border: `1px solid ${COLORS.border}`, background: 'rgba(0,0,0,0.10)', color: COLORS.muted, fontSize: '12px', lineHeight: 1.45 },
-  actionResultError: { borderColor: COLORS.bad, color: COLORS.bad },
+  actionResult: { marginTop: '10px', padding: '10px', borderRadius: '5px', border: `1px solid ${COLORS.seam}`, background: '#0b0c0f', color: COLORS.steel, fontSize: '11.5px', lineHeight: 1.5 },
+  actionResultError: { borderColor: COLORS.red, color: COLORS.red },
   proofAction: { minHeight: '36px', marginTop: '9px' },
-  event: { position: 'relative', display: 'grid', gridTemplateColumns: '10px minmax(0, 1fr)', gap: '10px', padding: '9px 0 9px 1px', borderBottom: `1px solid ${COLORS.border}` },
-  eventRail: { position: 'absolute', left: '4px', top: '18px', bottom: '-10px', width: '1px', background: COLORS.border },
-  eventDot: { position: 'relative', zIndex: 1, width: '8px', height: '8px', borderRadius: '50%', background: COLORS.accent, marginTop: '4px', boxShadow: '0 0 0 3px rgba(125,211,252,0.1)' },
+  event: { position: 'relative', display: 'grid', gridTemplateColumns: '10px minmax(0, 1fr)', gap: '10px', padding: '8px 0 8px 1px', borderBottom: `1px solid ${COLORS.seam}` },
+  eventRail: { position: 'absolute', left: '4px', top: '18px', bottom: '-10px', width: '1px', background: COLORS.frame },
+  eventDot: { position: 'relative', zIndex: 1, width: '7px', height: '7px', borderRadius: '50%', background: COLORS.amber, marginTop: '5px', boxShadow: '0 0 6px rgba(255,176,0,0.35)' },
   eventBody: { minWidth: 0 },
   eventTop: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '10px' },
-  eventName: { fontSize: '12px', fontWeight: 650, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  eventTime: { color: COLORS.muted, fontSize: '12px', flexShrink: 0, fontVariantNumeric: 'tabular-nums' },
-  eventMeta: { color: COLORS.muted, fontSize: '12px', marginTop: '3px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  memoryTrack: { height: '8px', display: 'flex', gap: '2px', margin: '5px 0 10px', background: 'rgba(255,255,255,0.08)', borderRadius: '999px', overflow: 'hidden' },
-  memoryVerified: { height: '100%', background: COLORS.good },
-  memoryOther: { height: '100%', background: 'rgba(255,255,255,0.18)' },
-  empty: { border: `1px dashed ${COLORS.border}`, borderRadius: '11px', color: COLORS.muted, padding: '16px', fontSize: '12px', lineHeight: 1.5, background: 'rgba(0,0,0,0.06)' },
-  unavailable: { border: `1px dashed ${COLORS.border}`, borderRadius: '10px', color: COLORS.muted, padding: '16px', fontSize: '12px', lineHeight: 1.5 },
-  metaRow: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '7px', marginBottom: '12px', color: COLORS.muted, fontSize: '12px' },
-  metaText: { color: COLORS.muted, fontSize: '12px', fontVariantNumeric: 'tabular-nums' },
-  metaBadge: { fontSize: '12px', padding: '1px 7px' },
+  eventName: { fontSize: '11.5px', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: MONO },
+  eventTime: { color: COLORS.steelDim, fontSize: '11px', flexShrink: 0, fontVariantNumeric: 'tabular-nums', fontFamily: MONO },
+  eventMeta: { color: COLORS.steelDim, fontSize: '11px', marginTop: '3px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  memoryTrack: { height: '8px', display: 'flex', gap: '2px', margin: '5px 0 10px', background: COLORS.flap, border: `1px solid ${COLORS.seam}`, borderRadius: '2px', overflow: 'hidden' },
+  memoryVerified: { height: '100%', background: COLORS.amber },
+  memoryOther: { height: '100%', background: 'rgba(139,145,155,0.22)' },
+  empty: { border: `1px dashed ${COLORS.frame}`, borderRadius: '6px', color: COLORS.steel, padding: '15px', fontSize: '11.5px', lineHeight: 1.55, background: COLORS.flap },
+  unavailable: { border: `1px dashed ${COLORS.frame}`, borderRadius: '6px', color: COLORS.steel, padding: '15px', fontSize: '11.5px', lineHeight: 1.55, background: COLORS.flap },
+  metaRow: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '14px', color: COLORS.steelDim, fontSize: '11.5px' },
+  metaText: { color: COLORS.steelDim, fontSize: '11px', fontVariantNumeric: 'tabular-nums', fontFamily: MONO, textTransform: 'uppercase', letterSpacing: '0.08em' },
+  metaBadge: { fontSize: '10.5px', padding: '1px 7px', fontFamily: MONO, textTransform: 'uppercase', letterSpacing: '0.08em' },
   controlRow: { display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' },
-  input: { flex: '1 1 160px', minWidth: '140px', minHeight: '34px', padding: '0 10px', border: `1px solid ${COLORS.border}`, borderRadius: '8px', background: 'rgba(0,0,0,0.14)', color: COLORS.text, fontSize: '12px', boxSizing: 'border-box' },
-  textarea: { width: '100%', minHeight: '58px', padding: '8px 10px', border: `1px solid ${COLORS.border}`, borderRadius: '8px', background: 'rgba(0,0,0,0.14)', color: COLORS.text, fontSize: '12px', lineHeight: 1.45, resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' },
-  recallResult: { display: 'grid', gap: '4px', padding: '10px 11px', marginTop: '8px', border: `1px solid ${COLORS.border}`, borderRadius: '10px', background: 'rgba(0,0,0,0.10)' },
-  recallTitle: { fontSize: '12px', fontWeight: 650, color: COLORS.text },
-  recallBody: { color: COLORS.muted, fontSize: '12px', lineHeight: 1.45 },
+  input: { flex: '1 1 160px', minWidth: '140px', minHeight: '32px', padding: '0 10px', border: `1px solid ${COLORS.frame}`, borderRadius: '4px', background: '#0b0c0f', color: COLORS.letter, fontSize: '12px', boxSizing: 'border-box', fontFamily: MONO },
+  textarea: { width: '100%', minHeight: '58px', padding: '8px 10px', border: `1px solid ${COLORS.frame}`, borderRadius: '4px', background: '#0b0c0f', color: COLORS.letter, fontSize: '12px', lineHeight: 1.45, resize: 'vertical', boxSizing: 'border-box', fontFamily: MONO },
+  recallResult: { display: 'grid', gap: '4px', padding: '10px 11px', marginTop: '8px', border: `1px solid ${COLORS.seam}`, borderRadius: '5px', background: '#0b0c0f' },
+  recallTitle: { fontSize: '12px', fontWeight: 700, color: COLORS.letter },
+  recallBody: { color: COLORS.steel, fontSize: '11.5px', lineHeight: 1.5 },
   recallTags: { display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '2px' },
-  routeGrid: { display: 'grid', gap: '6px' },
-  routeRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '12px', padding: '7px 0', borderBottom: `1px solid ${COLORS.border}` },
-  routeName: { fontSize: '12px', fontWeight: 650, fontFamily: 'ui-monospace, monospace' },
-  routeTool: { color: COLORS.muted, fontSize: '12px', textAlign: 'right' },
-  feedback: { marginTop: '9px', padding: '9px 10px', borderRadius: '9px', border: `1px solid ${COLORS.border}`, background: 'rgba(0,0,0,0.10)', color: COLORS.muted, fontSize: '12px', lineHeight: 1.45 },
-  feedbackError: { borderColor: COLORS.bad, color: COLORS.bad },
-  fleetComposer: { display: 'grid', gap: '8px', alignItems: 'start', padding: '10px 11px', border: `1px solid ${COLORS.border}`, borderRadius: '10px', background: 'rgba(0,0,0,0.10)' },
-  // Signature element: the tab rail. Amplifies what the system already owns —
-  // the accent token, the eyebrow's uppercase tracking, tabular numerals — at
-  // full strength. Underline motif (like the header rule) instead of boxes.
-  tabBar: { position: 'sticky', top: '0', zIndex: 10, display: 'flex', gap: '20px', margin: '0 -34px 22px', padding: '10px 34px 0', borderBottom: `1px solid ${COLORS.border}`, background: 'var(--ui-surface, #14161b)' },
-  tabBarLabel: { alignSelf: 'center', marginRight: '8px', color: COLORS.accent, fontSize: '12px', fontWeight: 700, letterSpacing: '0.13em', textTransform: 'uppercase' },
-  tab: { position: 'relative', display: 'inline-flex', alignItems: 'center', gap: '7px', minHeight: '42px', padding: '0 2px', border: 0, background: 'transparent', color: COLORS.muted, fontSize: '13px', fontWeight: 700, letterSpacing: '0.02em', cursor: 'pointer', transition: 'color 150ms ease' },
-  tabActive: { color: COLORS.text },
-  tabActiveMark: { position: 'absolute', left: 0, right: 0, bottom: '-1px', height: '2px', background: COLORS.accent, borderRadius: '2px 2px 0 0' },
-  tabCount: { minWidth: '18px', padding: '1px 6px', textAlign: 'center', fontSize: '12px', borderRadius: '999px', background: COLORS.warn, color: '#10131a', fontWeight: 700, fontVariantNumeric: 'tabular-nums' },
-  // Tab grids: lead card spans full width; supporting cards share the row below.
-  // Hierarchy follows task priority — the tab's reason-for-visit leads.
-  tabGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '16px', alignItems: 'start' },
-  leadRow: { marginBottom: '16px' },
-  supportGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '16px', alignItems: 'start' },
-  moreChecks: { marginTop: '10px', border: `1px solid ${COLORS.border}`, borderRadius: '10px', background: 'rgba(0,0,0,0.05)', padding: '9px 11px' },
-  moreChecksSummary: { cursor: 'pointer', listStyle: 'none', color: COLORS.muted, fontSize: '12px', fontWeight: 650 },
+  routeGrid: { display: 'grid', gap: '3px' },
+  routeRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '12px', padding: '6px 8px', borderBottom: `1px solid ${COLORS.seam}`, background: COLORS.flap, borderRadius: '3px' },
+  routeName: { fontSize: '11.5px', fontWeight: 650, fontFamily: MONO, color: COLORS.letter },
+  routeTool: { color: COLORS.steelDim, fontSize: '11px', textAlign: 'right', fontFamily: MONO },
+  feedback: { marginTop: '9px', padding: '9px 10px', borderRadius: '5px', border: `1px solid ${COLORS.seam}`, background: '#0b0c0f', color: COLORS.steel, fontSize: '11.5px', lineHeight: 1.5 },
+  feedbackError: { borderColor: COLORS.red, color: COLORS.red },
+  fleetComposer: { display: 'grid', gap: '8px', alignItems: 'start', padding: '10px 11px', border: `1px solid ${COLORS.seam}`, borderRadius: '5px', background: '#0b0c0f' },
+  // Platform rail: steel column with flap-tile tabs; the active tab is lit.
+  tabBar: { position: 'sticky', top: '0', zIndex: 10, display: 'flex', gap: '20px', margin: '0 -30px 20px', padding: '10px 30px 0', borderBottom: `1px solid ${COLORS.frame}`, background: 'linear-gradient(180deg, #12141a, #0e1014)' },
+  tabBarLabel: { alignSelf: 'center', marginRight: '8px', color: COLORS.amber, fontSize: '10.5px', fontWeight: 800, letterSpacing: '0.2em', textTransform: 'uppercase', fontFamily: MONO },
+  tab: { position: 'relative', display: 'inline-flex', alignItems: 'center', gap: '7px', minHeight: '40px', padding: '0 2px', border: 0, background: 'transparent', color: COLORS.steelDim, fontSize: '12px', fontWeight: 750, letterSpacing: '0.08em', textTransform: 'uppercase', cursor: 'pointer', fontFamily: COND, transition: 'color 150ms ease' },
+  tabActive: { color: COLORS.letter },
+  tabActiveMark: { position: 'absolute', left: 0, right: 0, bottom: '-1px', height: '2px', background: COLORS.amber, borderRadius: 0 },
+  tabCount: { minWidth: '17px', padding: '1px 6px', textAlign: 'center', fontSize: '10.5px', borderRadius: '2px', background: COLORS.amber, color: '#131313', fontWeight: 800, fontVariantNumeric: 'tabular-nums', fontFamily: MONO },
+  tabGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '14px', alignItems: 'start' },
+  leadRow: { marginBottom: '14px' },
+  supportGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '14px', alignItems: 'start' },
+  moreChecks: { marginTop: '10px', border: `1px solid ${COLORS.seam}`, borderRadius: '5px', background: COLORS.flap, padding: '9px 11px' },
+  moreChecksSummary: { cursor: 'pointer', listStyle: 'none', color: COLORS.steelDim, fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.09em' },
   moreChecksGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '8px', margin: '10px 0 2px' },
   actionButtonRow: { display: 'flex', gap: '8px', justifySelf: 'start' },
   eventToggleRow: { display: 'flex', justifyContent: 'center', marginTop: '10px' },
-  eventCapNote: { color: COLORS.muted, fontSize: '12px', textAlign: 'center', marginTop: '8px' },
+  eventCapNote: { color: COLORS.steelDim, fontSize: '11px', textAlign: 'center', marginTop: '8px' },
   findingsMore: { marginTop: '5px' },
-  findingsMoreSummary: { cursor: 'pointer', listStyle: 'none', color: COLORS.accent },
-  // --- Depth system (layered elevation) ------------------------------------
-  // Tier 1 recessed wells: darker inset surfaces for inputs, tracks, details.
-  // Tier 2 resting cards: subtle drop shadow + top hairline highlight.
-  // Tier 3 raised leads: hero + GoalCard, stronger shadow and light edge.
+  findingsMoreSummary: { cursor: 'pointer', listStyle: 'none', color: COLORS.amber },
+  // Depth system: the board is physical — resting panels sit IN the chassis,
+  // leads project slightly. Keep the keys (callers reference them).
   cardElevated: {
-    background: 'linear-gradient(180deg, rgba(255,255,255,0.028), rgba(255,255,255,0) 42%), rgba(0,0,0,0.10)',
-    border: `1px solid ${COLORS.border}`,
-    borderTopColor: 'rgba(255,255,255,0.16)',
-    boxShadow: '0 1px 2px rgba(0,0,0,0.18), 0 6px 18px rgba(0,0,0,0.14)'
+    background: 'linear-gradient(180deg, #1b1e24, #14161b 62%)',
+    border: '1px solid #262a30',
+    borderTopColor: '#3a3f47',
+    boxShadow: '0 1px 2px rgba(0,0,0,0.5), 0 12px 28px rgba(0,0,0,0.4)'
   },
   cardLead: {
-    background: 'linear-gradient(180deg, rgba(255,255,255,0.038), rgba(255,255,255,0) 46%), rgba(0,0,0,0.14)',
-    border: `1px solid rgba(255,255,255,0.13)`,
-    borderTopColor: 'rgba(255,255,255,0.20)',
-    boxShadow: '0 2px 4px rgba(0,0,0,0.22), 0 14px 34px rgba(0,0,0,0.24)'
+    background: 'linear-gradient(180deg, #1e222a, #15181d 60%)',
+    border: '1px solid #2b2f36',
+    borderTopColor: '#43484f',
+    boxShadow: '0 2px 4px rgba(0,0,0,0.55), 0 18px 42px rgba(0,0,0,0.45)'
   },
   hoverLift: {
-    transition: 'transform 180ms cubic-bezier(0.2, 0.7, 0.3, 1), box-shadow 180ms cubic-bezier(0.2, 0.7, 0.3, 1), border-color 180ms ease'
+    transition: 'transform 160ms cubic-bezier(0.2, 0.7, 0.3, 1), box-shadow 160ms cubic-bezier(0.2, 0.7, 0.3, 1), border-color 160ms ease'
   },
-  wellInset: {
-    boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.30)'
-  },
-  // --- Mission rail navigation ----------------------------------------------
-  // Vertical workspace spine: raised surface like the leads, sticky, with a
-  // live posture beacon and per-tab count badges.
-  layout: { display: 'grid', gridTemplateColumns: '212px minmax(0, 1fr)', gap: '20px', alignItems: 'start' },
+  wellInset: { boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.45)' },
+  // Mission rail: the platform column.
+  layout: { display: 'grid', gridTemplateColumns: '196px minmax(0, 1fr)', gap: '18px', alignItems: 'start' },
   rail: {
     position: 'sticky',
-    top: '16px',
+    top: '14px',
     display: 'flex',
     flexDirection: 'column',
-    gap: '14px',
-    padding: '14px 12px 12px',
-    background: 'linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.12))',
-    border: `1px solid ${COLORS.border}`,
-    borderTopColor: 'rgba(255,255,255,0.18)',
-    borderRadius: '16px',
-    boxShadow: '0 2px 4px rgba(0,0,0,0.20), 0 12px 30px rgba(0,0,0,0.22)'
+    gap: '12px',
+    padding: '13px 11px 11px',
+    background: 'linear-gradient(180deg, #1a1d23, #121419)',
+    border: '1px solid #23262c',
+    borderTopColor: '#34383f',
+    borderRadius: '10px',
+    boxShadow: '0 2px 4px rgba(0,0,0,0.5), 0 12px 30px rgba(0,0,0,0.4)'
   },
-  railHead: { display: 'flex', alignItems: 'center', gap: '8px', padding: '2px 6px 11px', borderBottom: `1px solid ${COLORS.border}` },
-  railDot: { width: '9px', height: '9px', borderRadius: '50%', flexShrink: 0 },
+  railHead: { display: 'flex', alignItems: 'center', gap: '8px', padding: '2px 6px 11px', borderBottom: `1px solid ${COLORS.seam}` },
+  railDot: { width: '8px', height: '8px', borderRadius: '50%', flexShrink: 0 },
   railItems: { display: 'grid', gap: '4px' },
   railItem: {
     position: 'relative',
     display: 'grid',
-    gridTemplateColumns: '18px minmax(0, 1fr) auto',
+    gridTemplateColumns: '17px minmax(0, 1fr) auto',
     alignItems: 'center',
-    gap: '10px',
-    minHeight: '40px',
-    padding: '0 10px 0 15px',
-    border: 0,
-    borderRadius: '10px',
+    gap: '9px',
+    minHeight: '38px',
+    padding: '0 9px 0 13px',
+    border: `1px solid transparent`,
+    borderRadius: '4px',
     background: 'transparent',
-    color: COLORS.muted,
-    fontSize: '13px',
-    fontWeight: 650,
+    color: COLORS.steelDim,
+    fontSize: '12px',
+    fontWeight: 700,
+    letterSpacing: '0.07em',
+    textTransform: 'uppercase',
     textAlign: 'left',
-    cursor: 'pointer'
+    cursor: 'pointer',
+    fontFamily: COND
   },
-  railItemMark: { position: 'absolute', left: '5px', top: '25%', bottom: '25%', width: '3px', borderRadius: '999px', background: COLORS.accent, boxShadow: `0 0 8px ${COLORS.accent}` },
+  railItemMark: { position: 'absolute', left: '4px', top: '22%', bottom: '22%', width: '3px', borderRadius: '1px', background: COLORS.amber, boxShadow: '0 0 7px rgba(255,176,0,0.5)' },
   workspace: { minWidth: 0 },
-  // --- Instrument bank ------------------------------------------------------
-  // The dashboard as a physical machine: machined panels, beveled edges,
-  // switches, dials, hinged doors. Light comes from above.
+  // Instrument bank: machined steel panels. Light from above, dark seams.
   module: {
     position: 'relative',
-    background: 'repeating-linear-gradient(180deg, rgba(255,255,255,0.012) 0 1px, transparent 1px 3px), linear-gradient(180deg, #262a33, #1a1d24 58%, #16191e)',
-    border: '1px solid rgba(0,0,0,0.65)',
-    borderTopColor: 'rgba(255,255,255,0.18)',
-    borderLeftColor: 'rgba(255,255,255,0.09)',
-    borderRadius: '12px',
-    padding: '18px',
-    boxShadow: '0 2px 3px rgba(0,0,0,0.5), 0 10px 26px rgba(0,0,0,0.4), inset 0 -3px 8px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.07)'
+    background: 'linear-gradient(180deg, #1b1e24, #14161b 62%)',
+    border: '1px solid #23262c',
+    borderTopColor: '#3a3f47',
+    borderRadius: '10px',
+    padding: '15px 16px 14px',
+    boxShadow: '0 2px 3px rgba(0,0,0,0.5), 0 10px 26px rgba(0,0,0,0.38), inset 0 1px 0 rgba(255,255,255,0.05)'
   },
   moduleLead: {
-    background: 'repeating-linear-gradient(180deg, rgba(255,255,255,0.014) 0 1px, transparent 1px 3px), linear-gradient(180deg, #2a2e38, #1c1f27 55%, #181b21)',
-    boxShadow: '0 3px 5px rgba(0,0,0,0.55), 0 16px 40px rgba(0,0,0,0.48), inset 0 -4px 10px rgba(0,0,0,0.48), inset 0 1px 0 rgba(255,255,255,0.08)'
+    background: 'linear-gradient(180deg, #1e222a, #15181d 60%)',
+    boxShadow: '0 3px 5px rgba(0,0,0,0.55), 0 16px 40px rgba(0,0,0,0.44), inset 0 1px 0 rgba(255,255,255,0.06)'
   },
-  screwPlate: { position: 'absolute', top: '8px', right: '10px', display: 'flex', gap: '6px', zIndex: 3 },
+  screwPlate: { position: 'absolute', top: '7px', right: '9px', display: 'flex', gap: '6px', zIndex: 3 },
   screw: {
-    width: '9px', height: '9px', borderRadius: '50%',
-    background: 'linear-gradient(45deg, transparent 44%, rgba(20,22,26,0.9) 46% 54%, transparent 56%), radial-gradient(circle at 35% 30%, #565c66, #20242a 72%)',
-    boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.25), inset 0 -1px 1px rgba(0,0,0,0.6), 0 1px 1px rgba(0,0,0,0.6)'
+    width: '7px', height: '7px', borderRadius: '50%',
+    background: 'radial-gradient(circle at 35% 30%, #4d525a, #17191d 74%)',
+    boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.22), inset 0 -1px 1px rgba(0,0,0,0.65), 0 1px 1px rgba(0,0,0,0.6)'
   },
   gaugeWrap: { position: 'relative', width: '96px', height: '96px', flexShrink: 0 },
   dialFace: {
     position: 'absolute', inset: 0, borderRadius: '50%',
-    background: 'radial-gradient(circle at 42% 34%, #2c3038, #191c22 72%)',
-    border: '1px solid rgba(0,0,0,0.6)',
-    boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.5), inset 0 -1px 0 rgba(255,255,255,0.05), 0 2px 5px rgba(0,0,0,0.4)'
+    background: 'radial-gradient(circle at 42% 34%, #1d2026, #0d0e11 74%)',
+    border: '1px solid #2c3037',
+    boxShadow: 'inset 0 2px 5px rgba(0,0,0,0.6)'
   },
   dialTicks: { position: 'absolute', inset: 0, borderRadius: '50%' },
   dialNeedle: {
     position: 'absolute', left: '50%', bottom: '50%',
-    width: '2.5px', height: '40%', marginLeft: '-1.25px',
-    background: 'linear-gradient(180deg, var(--ui-danger, #f28b8b), rgba(242,139,139,0.25))',
+    width: '2px', height: '40%', marginLeft: '-1px',
+    background: `linear-gradient(180deg, ${COLORS.amber}, rgba(255,176,0,0.2))`,
     transformOrigin: 'bottom center',
     transition: 'transform 650ms cubic-bezier(0.16, 1, 0.3, 1)'
   },
   dialHub: {
-    position: 'absolute', left: '50%', bottom: '50%', width: '11px', height: '11px', marginLeft: '-5.5px', marginBottom: '-5.5px',
-    borderRadius: '50%', background: 'radial-gradient(circle at 38% 32%, #565c66, #21242b)',
-    boxShadow: '0 1px 2px rgba(0,0,0,0.6)'
+    position: 'absolute', left: '50%', bottom: '50%', width: '10px', height: '10px', marginLeft: '-5px', marginBottom: '-5px',
+    borderRadius: '50%', background: 'radial-gradient(circle at 38% 32%, #4d525a, #17191d)',
+    boxShadow: '0 1px 2px rgba(0,0,0,0.7)'
   },
   dialNeedleClass: 'sips-dial-needle',
-  dialLabel: { textAlign: 'center', color: COLORS.muted, fontSize: '11px', marginTop: '6px', textTransform: 'uppercase', letterSpacing: '0.09em' },
-  // Toggle switch (master power / selfloop).
+  dialLabel: { textAlign: 'center', color: COLORS.steelDim, fontSize: '10px', marginTop: '6px', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 700 },
+  // Toggle switch: steel slot, lit when on.
   toggleSlot: {
-    position: 'relative', width: '58px', height: '30px', borderRadius: '999px',
-    background: '#101318',
-    border: '1px solid rgba(0,0,0,0.65)',
-    boxShadow: 'inset 0 2px 5px rgba(0,0,0,0.65), inset 0 -1px 0 rgba(255,255,255,0.05)',
+    position: 'relative', width: '52px', height: '26px', borderRadius: '999px',
+    background: '#08090b',
+    border: `1px solid ${COLORS.frame}`,
+    boxShadow: 'inset 0 2px 5px rgba(0,0,0,0.7)',
     cursor: 'pointer', flexShrink: 0
   },
   toggleKnob: {
-    position: 'absolute', top: '2px', left: '2px', width: '26px', height: '24px', borderRadius: '999px',
-    background: 'linear-gradient(180deg, #4b515b, #2b2f37 60%, #22262d)',
-    border: '1px solid rgba(0,0,0,0.5)',
-    boxShadow: '0 2px 4px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.18)',
+    position: 'absolute', top: '2px', left: '2px', width: '22px', height: '20px', borderRadius: '999px',
+    background: 'linear-gradient(180deg, #565c66, #2b2f37 62%)',
+    border: '1px solid rgba(0,0,0,0.55)',
+    boxShadow: '0 2px 3px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.2)',
     transition: 'transform 150ms cubic-bezier(0.16, 1, 0.3, 1)'
   },
   toggleKnobClass: 'sips-toggle-knob',
-  toggleOn: { transform: 'translateX(28px)' },
-  // Push button (verification checks): deep recess + raised cap that visibly
-  // depresses on :active via the stylesheet hook.
+  toggleOn: { transform: 'translateX(26px)' },
+  // Push button: recessed steel with lit cap when running.
   pushBtn: {
-    appearance: 'none', border: '1px solid rgba(0,0,0,0.65)', padding: '9px 14px', cursor: 'pointer',
+    appearance: 'none', border: `1px solid ${COLORS.frame}`, padding: '9px 14px', cursor: 'pointer',
     display: 'inline-grid', placeItems: 'center', gap: '4px',
-    minHeight: '54px', borderRadius: '10px',
-    background: 'repeating-linear-gradient(180deg, rgba(255,255,255,0.01) 0 1px, transparent 1px 3px), #101318',
-    boxShadow: 'inset 0 3px 7px rgba(0,0,0,0.7), inset 0 -1px 0 rgba(255,255,255,0.05)',
-    color: COLORS.muted, fontSize: '12px', fontWeight: 650,
+    minHeight: '52px', borderRadius: '6px',
+    background: 'linear-gradient(180deg, #17191e, #101215)',
+    boxShadow: 'inset 0 3px 7px rgba(0,0,0,0.75), inset 0 -1px 0 rgba(255,255,255,0.04)',
+    color: COLORS.steel, fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.09em', fontFamily: COND,
     transition: 'box-shadow 90ms ease, transform 90ms ease, color 90ms ease'
   },
   pushCap: {
     display: 'grid', placeItems: 'center',
-    width: '26px', height: '26px', borderRadius: '50%',
-    background: 'linear-gradient(180deg, #4b515b, #262a31)',
+    width: '24px', height: '24px', borderRadius: '50%',
+    background: 'linear-gradient(180deg, #565c66, #262a31)',
     border: '1px solid rgba(0,0,0,0.55)',
-    boxShadow: '0 2px 3px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.16)'
+    boxShadow: '0 2px 3px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.18)'
   },
-  // Hinged proof-breaker door.
-  breaker: { perspective: '900px', borderRadius: '10px' },
+  // Inspection hatch (proof layers): steel door over a dark interior.
+  breaker: { perspective: '900px', borderRadius: '6px' },
   breakerFrame: {
-    position: 'relative', borderRadius: '10px', overflow: 'hidden',
-    background: '#14171d',
-    border: '1px solid rgba(0,0,0,0.6)',
-    boxShadow: 'inset 0 2px 5px rgba(0,0,0,0.5)'
+    position: 'relative', borderRadius: '6px', overflow: 'hidden',
+    background: '#0b0c0f',
+    border: `1px solid ${COLORS.seam}`,
+    boxShadow: 'inset 0 2px 5px rgba(0,0,0,0.55)'
   },
   breakerDoor: {
     position: 'relative', zIndex: 2, cursor: 'pointer',
     display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px',
-    padding: '12px 13px',
-    background: 'repeating-linear-gradient(180deg, rgba(255,255,255,0.015) 0 1px, transparent 1px 3px), linear-gradient(180deg, #31353f, #22252d)',
-    border: '1px solid rgba(0,0,0,0.6)', borderTopColor: 'rgba(255,255,255,0.16)', borderLeftColor: 'rgba(255,255,255,0.08)',
-    borderRadius: '10px', transformOrigin: 'top center',
+    padding: '11px 12px',
+    background: 'linear-gradient(180deg, #262a31, #1a1d23)',
+    border: '1px solid #2c3037', borderTopColor: '#3d4148',
+    borderRadius: '6px', transformOrigin: 'top center',
     transition: 'transform 280ms cubic-bezier(0.55, 0, 0.7, 0.35), box-shadow 280ms ease',
-    boxShadow: '0 3px 5px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.09)'
+    boxShadow: '0 3px 5px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.08)'
   },
   breakerOpen: { transform: 'rotateX(-78deg)', boxShadow: '0 -1px 3px rgba(0,0,0,0.3)' },
   breakerInterior: {
-    position: 'absolute', inset: 0, zIndex: 1, padding: '11px 12px', paddingTop: '46px',
-    background: '#101318', color: COLORS.muted, fontSize: '12px', lineHeight: 1.45
+    position: 'absolute', inset: 0, zIndex: 1, padding: '11px 12px', paddingTop: '44px',
+    background: '#0b0c0f', color: COLORS.steel, fontSize: '11.5px', lineHeight: 1.5
   },
-  // Paper tape (activity stream).
+  // Paper tape: receipt stub — literal SIPS receipts on ticket paper.
   tapeStrip: {
-    background: 'repeating-linear-gradient(180deg, #f4efe4, #f4efe4 26px, #ece6da 27px)',
-    color: '#33302a', borderRadius: '6px', padding: '12px 14px',
-    boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.18), 0 3px 8px rgba(0,0,0,0.35)',
-    fontVariantNumeric: 'tabular-nums'
+    background: 'repeating-linear-gradient(180deg, #f2ede2, #f2ede2 25px, #e9e3d6 26px)',
+    color: '#2e2b26', borderRadius: '4px', padding: '12px 14px',
+    boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.16), 0 3px 8px rgba(0,0,0,0.4)',
+    fontVariantNumeric: 'tabular-nums', fontFamily: MONO, fontSize: '11.5px'
   },
   tapeRow: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '12px',
-    padding: '5px 0', borderBottom: '1px dashed rgba(51,48,42,0.25)', fontSize: '12px'
+    padding: '4px 0', borderBottom: '1px dashed rgba(46,43,38,0.3)', fontSize: '11.5px'
   },
-  // Session runs + campaign fleet: compact shared list rows.
-  listRow: { display: 'grid', gap: '4px', padding: '8px 0', borderBottom: `1px solid ${COLORS.border}` },
-  listMain: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' },
-  listId: { fontSize: '12px', fontWeight: 650, fontFamily: 'ui-monospace, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  listMeta: { display: 'inline-flex', alignItems: 'center', gap: '10px', flexShrink: 0 },
-  listSecondary: { color: COLORS.muted, fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  // Departure rows (runs/fleet): fixed board columns.
+  listRow: { display: 'grid', gap: '3px', padding: '6px 8px', borderBottom: `1px solid ${COLORS.seam}`, background: COLORS.flap, borderRadius: '3px', marginBottom: '3px' },
+  listMain: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', minWidth: 0 },
+  listId: { fontSize: '11.5px', fontWeight: 650, fontFamily: MONO, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, color: COLORS.letter },
+  listMeta: { display: 'inline-flex', alignItems: 'center', gap: '9px', flexShrink: 0, fontVariantNumeric: 'tabular-nums', fontFamily: MONO, fontSize: '11px', color: COLORS.steel },
+  listSecondary: { color: COLORS.steelDim, fontSize: '11px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   listTags: { display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' },
-  // Drill-down rows (Runs/Fleet): clickable summary row + lazy detail panel.
-  drillRow: { display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, padding: '2px 6px', margin: '-2px -6px', borderRadius: '8px', cursor: 'pointer', textAlign: 'left' },
-  drillBody: { display: 'grid', gap: '4px', minWidth: 0, flex: 1 },
-  drillChevron: { display: 'inline-flex', alignItems: 'center', color: COLORS.muted, flexShrink: 0, transition: 'transform 150ms ease' },
-  drillPanel: { margin: '4px 0 6px', padding: '10px 11px', border: `1px solid ${COLORS.border}`, borderRadius: '10px', background: 'rgba(0,0,0,0.10)', display: 'grid', gap: '9px' },
+  drillRow: { display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, padding: '2px 6px', margin: '-2px -6px', borderRadius: '4px', cursor: 'pointer', textAlign: 'left' },
+  drillBody: { display: 'grid', gap: '3px', minWidth: 0, flex: 1 },
+  drillChevron: { display: 'inline-flex', alignItems: 'center', color: COLORS.steelDim, flexShrink: 0, transition: 'transform 150ms ease' },
+  drillPanel: { margin: '4px 0 6px', padding: '10px 11px', border: `1px solid ${COLORS.seam}`, borderRadius: '5px', background: '#0b0c0f', display: 'grid', gap: '9px' },
   drillStack: { display: 'grid', gap: '9px', minWidth: 0 },
   drillHead: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', minWidth: 0 },
-  drillObjective: { fontSize: '12px', fontWeight: 650, minWidth: 0, lineHeight: 1.4 },
-  drillMeta: { color: COLORS.muted, fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' },
-  drillLabel: { color: COLORS.muted, fontSize: '12px' },
-  drillReason: { color: COLORS.muted, fontSize: '12px', lineHeight: 1.45 },
+  drillObjective: { fontSize: '11.5px', fontWeight: 650, minWidth: 0, lineHeight: 1.45 },
+  drillMeta: { color: COLORS.steelDim, fontSize: '11px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', fontFamily: MONO },
+  drillLabel: { color: COLORS.steelDim, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.09em', fontWeight: 650 },
+  drillReason: { color: COLORS.steel, fontSize: '11.5px', lineHeight: 1.5 },
   taskRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', minWidth: 0 },
   taskMeta: { display: 'inline-flex', alignItems: 'center', gap: '8px', flexShrink: 0 },
-  taskAttempts: { color: COLORS.muted, fontSize: '12px', fontVariantNumeric: 'tabular-nums', flexShrink: 0 },
-  taskGateChip: { display: 'inline-flex', alignItems: 'center', flexShrink: 0, fontSize: '11px', lineHeight: 1, border: `1px solid ${COLORS.border}`, borderRadius: '999px', padding: '0 7px', minHeight: '20px', fontVariantNumeric: 'tabular-nums' },
-  taskLessonChip: { display: 'inline-flex', alignItems: 'center', gap: '4px', flexShrink: 0, fontSize: '11px', lineHeight: 1, color: COLORS.accent, border: `1px solid ${COLORS.border}`, borderRadius: '999px', padding: '0 7px', minHeight: '20px' },
+  taskAttempts: { color: COLORS.steelDim, fontSize: '11px', fontVariantNumeric: 'tabular-nums', flexShrink: 0, fontFamily: MONO },
+  taskGateChip: { display: 'inline-flex', alignItems: 'center', flexShrink: 0, fontSize: '10.5px', lineHeight: 1, border: `1px solid ${COLORS.frame}`, borderRadius: '2px', padding: '2px 6px', minHeight: '18px', fontVariantNumeric: 'tabular-nums', fontFamily: MONO, color: COLORS.steel, background: COLORS.flap },
+  taskLessonChip: { display: 'inline-flex', alignItems: 'center', gap: '4px', flexShrink: 0, fontSize: '10.5px', lineHeight: 1, color: COLORS.amber, border: `1px solid rgba(255,176,0,0.4)`, borderRadius: '2px', padding: '2px 6px', minHeight: '18px', fontFamily: MONO, background: COLORS.flap },
   eventRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '10px', minWidth: 0 },
-  eventType: { fontSize: '12px', fontWeight: 650, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  eventType: { fontSize: '11.5px', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: MONO },
   childRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', minWidth: 0 },
   childStack: { display: 'grid', gap: '4px', minWidth: 0 },
   childStatusWrap: { position: 'relative', display: 'inline-flex', flexShrink: 0 },
-  childStatusBtn: { display: 'inline-flex', alignItems: 'center', gap: '3px', minHeight: '22px', padding: '0 7px', border: `1px solid ${COLORS.border}`, borderRadius: '999px', background: 'transparent', color: COLORS.muted, fontSize: '11px', cursor: 'pointer' },
-  childStatusMenu: { position: 'absolute', top: 'calc(100% + 4px)', right: 0, zIndex: 30, display: 'grid', minWidth: '132px', padding: '4px', border: `1px solid ${COLORS.border}`, borderRadius: '9px', background: 'var(--ui-surface-raised, #1c2027)', boxShadow: '0 10px 26px rgba(0,0,0,0.35)' },
-  childStatusOption: { border: 0, background: 'transparent', color: COLORS.text, fontSize: '12px', textAlign: 'left', padding: '6px 8px', borderRadius: '6px', cursor: 'pointer' },
-  childStatusOptionCurrent: { color: COLORS.muted, cursor: 'default' },
-  childStatusOptionDanger: { color: COLORS.bad },
+  childStatusBtn: { display: 'inline-flex', alignItems: 'center', gap: '3px', minHeight: '22px', padding: '0 7px', border: `1px solid ${COLORS.frame}`, borderRadius: '2px', background: COLORS.flap, color: COLORS.steel, fontSize: '10.5px', cursor: 'pointer', fontFamily: MONO },
+  childStatusMenu: { position: 'absolute', top: 'calc(100% + 4px)', right: 0, zIndex: 30, display: 'grid', minWidth: '132px', padding: '4px', border: `1px solid ${COLORS.frame}`, borderRadius: '5px', background: '#1a1d23', boxShadow: '0 10px 26px rgba(0,0,0,0.5)' },
+  childStatusOption: { border: 0, background: 'transparent', color: COLORS.letter, fontSize: '11.5px', textAlign: 'left', padding: '6px 8px', borderRadius: '3px', cursor: 'pointer', fontFamily: COND },
+  childStatusOptionCurrent: { color: COLORS.steelDim, cursor: 'default' },
+  childStatusOptionDanger: { color: COLORS.red },
   memoryFilters: { display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' },
-  memoryMatched: { color: COLORS.muted, fontSize: '12px', fontVariantNumeric: 'tabular-nums', marginTop: '6px' },
-  widgetChips: { display: 'flex', flexWrap: 'wrap', gap: '8px' },
-  widgetChip: { display: 'inline-flex', alignItems: 'center', gap: '6px', minHeight: '30px', padding: '0 12px', border: `1px solid ${COLORS.border}`, borderRadius: '999px', background: 'rgba(0,0,0,0.08)', color: COLORS.text, fontSize: '12px', cursor: 'pointer' },
-  widgetChipDisabled: { color: COLORS.muted, cursor: 'default', opacity: 0.7 },
-  widgetChipCopied: { borderColor: COLORS.good, color: COLORS.good },
+  memoryMatched: { color: COLORS.steelDim, fontSize: '11px', fontVariantNumeric: 'tabular-nums', marginTop: '6px', fontFamily: MONO },
+  widgetChips: { display: 'flex', flexWrap: 'wrap', gap: '7px' },
+  widgetChip: { display: 'inline-flex', alignItems: 'center', gap: '6px', minHeight: '28px', padding: '0 11px', border: `1px solid ${COLORS.frame}`, borderRadius: '3px', background: COLORS.flap, color: COLORS.letter, fontSize: '11px', cursor: 'pointer', fontFamily: MONO },
+  widgetChipDisabled: { color: COLORS.steelDim, cursor: 'default', opacity: 0.7 },
+  widgetChipCopied: { borderColor: COLORS.green, color: COLORS.green },
   stripGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '8px' },
-  segRow: { display: 'inline-flex', gap: '4px' },
-  segBtn: { minHeight: '24px', padding: '0 9px', border: `1px solid ${COLORS.border}`, borderRadius: '999px', background: 'transparent', color: COLORS.muted, fontSize: '11px', cursor: 'pointer', fontVariantNumeric: 'tabular-nums' },
-  segBtnActive: { background: 'rgba(125,211,252,0.14)', borderColor: COLORS.accent, color: COLORS.text }
+  segRow: { display: 'inline-flex', gap: '3px' },
+  segBtn: { minHeight: '23px', padding: '0 9px', border: `1px solid ${COLORS.frame}`, borderRadius: '2px', background: COLORS.flap, color: COLORS.steelDim, fontSize: '10.5px', cursor: 'pointer', fontVariantNumeric: 'tabular-nums', fontFamily: MONO },
+  segBtnActive: { background: COLORS.amberDim, borderColor: COLORS.amber, color: COLORS.amber },
+  // --- Board primitives ------------------------------------------------------
+  boardSectionLabel: { display: 'flex', alignItems: 'center', gap: '8px', margin: '13px 0 6px', color: COLORS.steelDim, fontSize: '10px', fontWeight: 800, letterSpacing: '0.16em', textTransform: 'uppercase' },
+  boardSectionLabelRule: { flex: 1, height: '1px', background: COLORS.seam },
+  lampRow: { display: 'flex', gap: '5px', flexWrap: 'wrap' },
+  lampCell: { display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '3px 8px', background: COLORS.flap, border: `1px solid ${COLORS.seam}`, borderRadius: '3px', fontSize: '9.5px', fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: COLORS.steelDim, fontFamily: COND },
+  lampCellLit: { color: COLORS.letter, borderColor: 'rgba(255,176,0,0.35)' },
+  lampDot: { width: '6px', height: '6px', borderRadius: '50%', background: '#2b2f37', flexShrink: 0 },
+  lampDotLit: { boxShadow: '0 0 6px currentColor' },
+  flipTile: { position: 'relative', display: 'inline-grid', placeItems: 'center', background: COLORS.flap, border: `1px solid ${COLORS.seam}`, borderRadius: '3px', padding: '1px 7px', overflow: 'hidden' },
+  flipTileInner: { position: 'relative', zIndex: 1, fontVariantNumeric: 'tabular-nums' },
+  flipTileSeam: { position: 'absolute', left: 0, right: 0, top: '50%', height: '1px', background: 'rgba(0,0,0,0.55)', zIndex: 2 },
+  flipTileAnim: 'sips-flip-in'
 }
-
 // Adaptive polling: hidden windows and background panes don't need live data,
 // so queries stretch their interval 4x while document.hidden. Callers pass
 // their normal cadence; nothing changes while the panel is visible.
@@ -388,7 +432,8 @@ function toneFor(value) {
   const normalized = String(value || '').toLowerCase()
   if (['inspected', 'active', 'done', 'verified', 'connected', 'ready', 'healthy', 'ok', 'source_present'].includes(normalized)) return 'good'
   if (['not_inspected', 'paused', 'pending', 'unknown', 'loading', 'legacy', 'advisory_unavailable'].includes(normalized)) return 'warn'
-  if (normalized.includes('unproven') || ['partial', 'stale', 'degraded', 'incomplete'].includes(normalized)) return 'warn'
+  if (normalized.includes('unproven') || ['partial', 'degraded', 'incomplete'].includes(normalized)) return 'warn'
+  if (normalized === 'stale') return 'muted'
   if (['not_found', 'source_not_found', 'failed', 'error', 'blocked'].includes(normalized)) return 'bad'
   return 'muted'
 }
@@ -442,7 +487,7 @@ function lerpColor(fromHex, toHex, t) {
   return `rgb(${mix[0]}, ${mix[1]}, ${mix[2]})`
 }
 
-const SIPS_TONE_HEX = { good: '#69d39a', warn: '#f4c76b', bad: '#f28b8b', muted: '#98a2b3' }
+const SIPS_TONE_HEX = { good: '#39d98a', warn: '#ffb000', bad: '#ff5a5a', muted: '#79808b', accent: '#ffb000', steelDim: '#79808b' }
 
 // Evidence-gated celebration: fires at most once per minute, only when the
 // persisted proof trend genuinely advanced. Fire-and-forget overlay.
@@ -544,8 +589,90 @@ function trendLabel(values, unit = 'pts') {
   return `${delta > 0 ? '+' : '-'}${rounded}${unit} over ${values.length} samples`
 }
 
-function Sparkline({ values, color = COLORS.accent }) {
-  if (!values || values.length < 2) return jsx('div', { style: styles.signalDetail, children: 'Collecting trend' })
+// ---------------------------------------------------------------------------
+// THE BOARD primitives — split-flap departures for live SIPS state.
+// FlapCell: renders a value inside a flap tile with the seam line. FlipValue:
+// re-mounts the tile (key = value) so a changed value flips in with the
+// cascade animation; unchanged values never re-mount, so the board is calm
+// between polls. All motion respects prefers-reduced-motion via CSS.
+// ---------------------------------------------------------------------------
+
+function FlapCell({ value, color, mono = true, title, style, weight = 650, size }) {
+  return jsxs('span', {
+    title,
+    style: { ...styles.flipTile, ...(size ? { fontSize: size } : {}), ...(style || {}) },
+    children: [
+      jsx('span', { 'aria-hidden': true, style: styles.flipTileSeam }),
+      jsx('span', {
+        className: styles.flipTileAnim,
+        style: { ...styles.flipTileInner, color: color || COLORS.letter, fontWeight: weight, ...(mono ? { fontFamily: MONO } : {}) },
+        children: value
+      })
+    ]
+  })
+}
+
+// Flip-on-change wrapper: keyed by the rendered value so React swaps the node
+// (and the CSS flip animation runs) only when the value actually changes.
+function FlipValue({ value, color, mono = true, title, weight, size, style }) {
+  return jsx(FlapCell, { value, color, mono, title, weight, size, style, key: String(value) })
+}
+
+
+// Per-character flap digits: splits a value into fixed-cell tiles, each with
+// the midline seam — the split-flap signature. Mono + tabular keeps digits
+// uniform; per-char keys re-mount only changed characters.
+function FlapDigits({ value, color, size = '18px', weight = 800 }) {
+  const chars = String(value).split('')
+  return jsx('span', {
+    style: { display: 'inline-flex', gap: '2px', alignItems: 'center' },
+    children: chars.map((ch, i) => ch === ' '
+      ? jsx('span', { key: `sp-${i}`, style: { width: '4px' } })
+      : jsx('span', {
+          key: `${i}-${ch}`,
+          className: styles.flipTileAnim,
+          style: {
+            display: 'inline-grid', placeItems: 'center',
+            minWidth: '13px', padding: '2px 3px',
+            background: COLORS.flap,
+            border: `1px solid ${COLORS.seam}`,
+            borderTopColor: 'rgba(255,255,255,0.13)',
+            borderBottomColor: 'rgba(0,0,0,0.7)',
+            borderRadius: '2px',
+            position: 'relative',
+            overflow: 'hidden',
+            fontFamily: MONO,
+            fontSize: size,
+            fontWeight: weight,
+            fontVariantNumeric: 'tabular-nums',
+            color: color || COLORS.letter,
+            lineHeight: 1
+          },
+          children: [
+            jsx('span', { 'aria-hidden': true, style: { position: 'absolute', left: 0, right: 0, top: '50%', height: '1px', background: 'rgba(0,0,0,0.78)' } }),
+            jsx('span', { 'aria-hidden': true, style: { position: 'absolute', left: 0, right: 0, top: 0, height: '50%', background: 'rgba(255,255,255,0.05)' } }),
+            ch
+          ]
+        }))
+  })
+}
+
+// Lamp row: status read as platform lamps — lit dot + label, unlit stays dark.
+function LampRow({ items }) {
+  return jsx('div', { style: styles.lampRow, children: items.map((item) => jsxs('span', {
+    style: { ...styles.lampCell, ...(item.lit ? styles.lampCellLit : {}) },
+    children: [
+      jsx('span', {
+        'aria-hidden': true,
+        style: { ...styles.lampDot, ...(item.lit ? { ...styles.lampDotLit, background: item.color || COLORS.amber, color: item.color || COLORS.amber } : {}) }
+      }),
+      item.label
+    ]
+  }, item.label)) })
+}
+
+function Sparkline({ values, color = COLORS.amber }) {
+  if (!values || values.length < 2) return null // no trend yet: leave the slot empty, the detail line already explains
 
   const min = Math.min(...values)
   const max = Math.max(...values)
@@ -558,7 +685,7 @@ function Sparkline({ values, color = COLORS.accent }) {
     ariaHidden: true,
     style: styles.sparkline,
     children: [
-      jsx('line', { x1: '0', y1: '22', x2: '100', y2: '22', stroke: 'rgba(255,255,255,0.10)', strokeWidth: '1' }),
+      jsx('line', { x1: '0', y1: '22', x2: '100', y2: '22', stroke: 'rgba(139,145,155,0.25)', strokeWidth: '1' }),
       jsx('polyline', { points, fill: 'none', stroke: color, strokeWidth: '2', strokeLinecap: 'round', strokeLinejoin: 'round' })
     ]
   })
@@ -585,11 +712,22 @@ function histogramSparkline(histogram) {
 }
 
 function StateBadge({ value, tone }) {
-  const color = tone ? COLORS[tone] : toneColor(value)
+  const color = tone ? (TONE_LAMP[tone] || COLORS.steel) : toneColor(value)
 
   return jsx(Badge, {
     variant: 'outline',
-    style: { color, borderColor: color, fontSize: '12px' },
+    style: {
+      color,
+      borderColor: `${color}55`,
+      background: 'rgba(0,0,0,0.35)',
+      fontSize: '10px',
+      fontFamily: MONO,
+      textTransform: 'uppercase',
+      letterSpacing: '0.08em',
+      fontWeight: 700,
+      borderRadius: '3px',
+      padding: '1px 7px'
+    },
     children: formatStatus(value)
   })
 }
@@ -602,7 +740,7 @@ function Card({ title, icon, hint, lead = false, actions, children }) {
     children: [
       jsx('div', { style: styles.screwPlate, 'aria-hidden': true, children: [jsx('span', { style: styles.screw }), jsx('span', { style: styles.screw })] }),
       jsx('div', { style: styles.cardTitle, children: [
-        jsx(Codicon, { name: icon, size: '0.95rem' }),
+        jsx(Codicon, { name: icon, size: '0.95rem', style: { color: COLORS.amber } }),
         jsx('span', { children: title }),
         actions ? jsx('span', { style: { marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: '8px' }, children: actions }) : null
       ] }),
@@ -618,23 +756,24 @@ function Dial({ value, color, label, size = 96 }) {
   const clamped = Math.max(0, Math.min(100, Number(value) || 0))
   const angle = -120 + (clamped / 100) * 240
   const ticks = []
-  for (let i = 0; i <= 8; i++) {
-    const tickAngle = -120 + (i / 8) * 240
+  for (let i = 0; i <= 16; i++) {
+    const tickAngle = -120 + (i / 16) * 240
+    const major = i % 2 === 0
     ticks.push(jsx('div', {
       key: i,
       style: {
         position: 'absolute', left: '50%', top: '50%', width: '1.5px',
-        height: i % 2 === 0 ? '9px' : '6px',
+        height: major ? '8px' : '4px',
         marginLeft: '-0.75px',
-        background: i % 2 === 0 ? COLORS.muted : 'rgba(152,162,179,0.45)',
+        background: major ? COLORS.steelDim : 'rgba(139,145,155,0.3)',
         transformOrigin: 'center top',
-        transform: `translateY(-${size * 0.40}px) rotate(${tickAngle}deg) translateY(${size * 0.40}px)`
+        transform: `translateY(-${size * 0.42}px) rotate(${tickAngle}deg) translateY(${size * 0.42}px)`
       }
     }))
   }
   return jsx('div', { style: { ...styles.gaugeWrap, width: `${size}px`, height: `${size}px` }, role: 'img', 'aria-label': `${label}: ${clamped}%`, children: [
     jsx('div', { style: styles.dialFace }),
-    jsx('div', { style: { ...styles.dialTicks, transform: 'rotate(180deg)' }, children: ticks }),
+    jsx('div', { style: { ...styles.dialTicks }, children: ticks }),
     jsx('div', {
       className: 'sips-dial-needle',
       style: {
@@ -663,7 +802,7 @@ function Toggle({ on, onToggle, label }) {
     children: [
       jsx('span', {
         'aria-hidden': true,
-        style: { position: 'absolute', inset: 0, borderRadius: '999px', background: on ? 'rgba(105,211,154,0.18)' : 'transparent', transition: 'background 160ms ease' }
+        style: { position: 'absolute', inset: 0, borderRadius: '999px', background: on ? 'rgba(57,217,138,0.22)' : 'transparent', border: on ? `1px solid rgba(57,217,138,0.5)` : '1px solid transparent', transition: 'background 160ms ease, border-color 160ms ease' }
       }),
       jsx('span', { className: 'sips-toggle-knob', style: { ...styles.toggleKnob, ...(on ? styles.toggleOn : {}) } })
     ]
@@ -719,14 +858,18 @@ function Breaker({ title, badge, summary, boundary, action, defaultOpen = false 
 
 
 function Signal({ label, value, detail, tone = 'accent', progress, trend, trendUnit = 'pts', spark }) {
-  const color = tone === 'accent' ? COLORS.accent : toneColor(tone)
+  const color = tone === 'accent' ? COLORS.letter : TONE_LAMP[tone] || COLORS.letter
 
+  const lamp = TONE_LAMP[tone] || COLORS.amber
   return jsx('div', {
     style: styles.signal,
     children: [
-      jsx('div', { style: styles.signalLabel, children: label }),
+      jsx('div', { style: { ...styles.signalLabel, display: 'flex', alignItems: 'center', gap: '6px' }, children: [
+        jsx('span', { 'aria-hidden': true, style: { width: '5px', height: '5px', borderRadius: '50%', background: lamp, boxShadow: `0 0 5px ${lamp}88`, flexShrink: 0 } }),
+        label
+      ] }),
       jsxs('div', { style: { ...styles.signalValue, color, display: 'flex', alignItems: 'baseline', gap: '8px', minWidth: 0 }, children: [
-        jsx('span', { style: { fontVariantNumeric: 'tabular-nums' }, children: value }),
+        String(value).length <= 10 ? jsx(FlapDigits, { value, color }) : jsx(FlapCell, { value, color, title: value, style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' } }),
         spark ? jsx('span', {
           title: spark.title,
           'aria-label': spark.title,
@@ -788,7 +931,7 @@ function StatusOverview({ data, history, updatedAt, isFetching, fetchError, self
   const counts = data?.surface_counts || {}
   const surfaceTotal = Object.values(counts).reduce((sum, value) => sum + (Number(value) || 0), 0)
   const memory = data?.memory || {}
-  const postureColor = COLORS[posture.tone] || COLORS.muted
+  const postureColor = TONE_LAMP[posture.tone] || COLORS.steelDim
   // Freshness clock lives HERE, not in Dashboard: a 1s tick anywhere else
   // re-renders every card on the page. Only the hero pays for the ticking.
   const [clock, setClock] = useState(Date.now())
@@ -807,7 +950,7 @@ function StatusOverview({ data, history, updatedAt, isFetching, fetchError, self
       : ageSeconds === undefined
         ? 'Awaiting first update'
         : ageSeconds < 30 ? `Live · ${ageSeconds}s ago` : `Stale · ${ageSeconds}s ago`
-  const freshnessColor = fetchError || (ageSeconds !== undefined && ageSeconds >= 60) ? COLORS.warn : COLORS.good
+  const freshnessColor = fetchError || (ageSeconds !== undefined && ageSeconds >= 60) ? COLORS.amber : COLORS.green
   const surfaceTrend = history.map((sample) => sample.surfaceTotal)
   const memoryTrend = history.map((sample) => sample.memoryVerified)
   const lifecycleTrend = history.map((sample) => sample.lifecycle)
@@ -881,7 +1024,7 @@ function StatusOverview({ data, history, updatedAt, isFetching, fetchError, self
     'data-sips-lead': true,
     'data-sips-selfloop': selfloopActive && SIPS_AWAKE() ? 'on' : 'off',
     children: [
-      jsx('div', { style: styles.heroGlow }),
+      jsx('div', { style: { ...styles.heroGlow, display: 'none' }, 'aria-hidden': true }),
       jsx('div', {
         'data-sips-heartbeat': selfloopActive && SIPS_AWAKE() ? 'on' : 'off',
         style: { position: 'absolute', inset: 0, borderRadius: '18px', pointerEvents: 'none', background: `radial-gradient(420px 200px at 85% 0%, ${SIPS_TONE_HEX[posture.tone] || SIPS_TONE_HEX.muted}1a, transparent 70%)` }
@@ -892,7 +1035,7 @@ function StatusOverview({ data, history, updatedAt, isFetching, fetchError, self
           jsx('div', {
             style: styles.heroIdentity,
             children: [
-              jsx('div', { style: styles.eyebrow, children: 'LIVE SIPS TELEMETRY' }),
+              jsx('div', { style: styles.eyebrow, children: 'LIVE POSTURE' }),
               jsx('h2', { style: styles.heroTitle, children: 'System posture' }),
               jsx('p', { style: styles.heroText, children: postureCopy(posture, data?.status) }),
               jsx('div', {
@@ -909,9 +1052,9 @@ function StatusOverview({ data, history, updatedAt, isFetching, fetchError, self
             style: styles.readiness,
             children: [
               jsx('div', { style: { display: 'flex', alignItems: 'center', gap: '18px' }, children: [
-                jsx(Dial, { value: posture.coverage, color: SIPS_TONE_HEX[posture.tone] || SIPS_TONE_HEX.muted, label: 'proof coverage' }),
+                jsx(Dial, { value: posture.coverage, color: SIPS_TONE_HEX[posture.tone] || SIPS_TONE_HEX.steelDim, label: 'proof coverage' }),
                 jsx('div', { style: { textAlign: 'left' }, children: [
-                  jsx('div', { style: { fontSize: '17px', fontWeight: 750, fontVariantNumeric: 'tabular-nums', color: postureColor }, children: `${posture.readyProof}/${posture.totalProof || 0}` }),
+                  jsx(FlapDigits, { value: `${posture.readyProof}/${posture.totalProof || 0}`, color: postureColor, size: '16px' }),
                   jsx('div', { style: styles.dialLabel, children: 'layers ready' })
                 ] })
               ] })
@@ -922,10 +1065,10 @@ function StatusOverview({ data, history, updatedAt, isFetching, fetchError, self
       jsx('div', {
         style: styles.signalGrid,
         children: [
-          jsx(Signal, { label: 'Proof coverage', value: `${posture.coverage}%`, detail: `${posture.readyProof} of ${posture.totalProof || 0} layers ready`, tone: posture.tone, progress: posture.coverage, trend: proofTrend }),
-          jsx(Signal, { label: 'Surface area', value: compactNumber(surfaceTotal), detail: `${trendLabel(surfaceTrend, '')} · declared capabilities`, trend: surfaceTrend, trendUnit: '' }),
+          jsx(Signal, { label: 'Proof coverage', value: `${posture.readyProof}/${posture.totalProof || 0}`, detail: `${posture.coverage}% of layers ready`, tone: posture.tone, progress: posture.coverage, trend: proofTrend }),
+          jsx(Signal, { label: 'Surface area', value: compactNumber(surfaceTotal), detail: 'declared capabilities', trend: surfaceTrend, trendUnit: '' }),
           jsx(Signal, { label: 'Memory verified', value: compactNumber(memory.verified_or_active_count || 0), detail: memory.available ? `${compactNumber(memory.record_count || 0)} total records` : 'memory unavailable', tone: memory.available ? 'good' : 'warn', trend: memoryTrend, trendUnit: '' }),
-          jsx(Signal, { label: 'Lifecycle', value: compactNumber(data?.events?.event_count || 0), detail: `${trendLabel(lifecycleTrend, '')} · recorded events`, trend: lifecycleTrend, trendUnit: '', spark: lifecycleSpark })
+          jsx(Signal, { label: 'Lifecycle', value: compactNumber(data?.events?.event_count || 0), detail: 'recorded events', trend: lifecycleTrend, trendUnit: '', spark: lifecycleSpark })
         ]
       })
     ]
@@ -1255,18 +1398,22 @@ function GoalBoardCard({ api }) {
       total ? jsxs('div', { key: 'progress', children: [
         jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }, children: [
           jsx('span', { style: styles.label, children: 'Progress' }),
-          jsx('span', { style: { ...styles.value, fontVariantNumeric: 'tabular-nums' }, children: `${complete}/${total}` })
+          jsx(FlapDigits, { value: `${complete}/${total}`, size: '12px', weight: 750 })
         ] }),
-        jsx('div', { style: styles.progressTrack, children: jsx('div', { style: { ...styles.progressFill, width: `${total ? Math.round((complete / total) * 100) : 0}%`, background: COLORS.accent } }) })
+        jsx('div', { style: styles.progressTrack, children: complete > 0 ? jsx('div', { className: 'sips-progress-fill', style: { ...styles.progressFill, width: `${Math.round((complete / total) * 100)}%` } }) : null })
       ] }) : null,
       phases.length ? jsx('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '6px', margin: '11px 0 2px' }, key: 'phases', children: phases.map((phase) => jsxs('span', {
         style: {
           display: 'inline-flex', alignItems: 'center', gap: '5px',
           padding: '3px 9px', borderRadius: '999px', fontSize: '11px', fontWeight: 650,
-          border: `1px solid ${phase.status === 'active' ? COLORS.accent : COLORS.border}`,
-          color: phase.status === 'active' ? COLORS.accent : COLORS.muted
+          border: `1px solid ${phase.status === 'active' ? 'rgba(255,176,0,0.45)' : COLORS.seam}`,
+          color: phase.status === 'active' ? COLORS.amber : COLORS.steelDim,
+          fontFamily: MONO, textTransform: 'uppercase', letterSpacing: '0.06em', background: COLORS.flap
         },
-        children: [phase.status === 'active' ? '◐' : phase.status === 'done' ? '✓' : '○', ' ', phase.title]
+        children: [
+          jsx('span', { 'aria-hidden': true, style: { width: '6px', height: '6px', borderRadius: '50%', background: phase.status === 'active' ? COLORS.amber : phase.status === 'done' ? COLORS.green : '#2b2f37', boxShadow: phase.status === 'active' ? `0 0 6px ${COLORS.amber}88` : 'none', flexShrink: 0 } }),
+          ' ', phase.title
+        ]
       }, phase.title)) }) : null,
       tasks.length ? jsx('div', { style: { marginTop: '8px' }, key: 'tasks', children: tasks.slice(0, 5).map((task) => jsxs('div', { style: styles.row, children: [
         jsxs('span', { style: { fontSize: '12px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: [
@@ -1330,7 +1477,7 @@ function GoalCard({ goal, api, selfloop, onSelfloopMutated }) {
     title: 'Goal loop',
     icon: 'target',
     lead: true,
-    hint: `${goal.mode || 'legacy'} mode · ${goal.turn_count || 0} turns · ${goal.cycle_count || 0} cycles`,
+    hint: `${goal.mode || 'legacy'} mode · ${goal.turn_count || 0} turn${goal.turn_count === 1 ? '' : 's'} · ${goal.cycle_count || 0} cycle${goal.cycle_count === 1 ? '' : 's'}`,
     children: [
       jsx('div', {
         style: { display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '13px' },
@@ -1353,11 +1500,13 @@ function GoalCard({ goal, api, selfloop, onSelfloopMutated }) {
           })
         ]
       }),
-      jsx('div', {
-        style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' },
-        children: [jsx('span', { style: styles.label, children: 'Subtask progress' }), jsx('span', { style: { ...styles.value, fontVariantNumeric: 'tabular-nums' }, children: `${done}/${total || 0}` })]
-      }),
-      jsx('div', { style: styles.progressTrack, children: jsx('div', { style: { ...styles.progressFill, width: `${progress}%`, background: goalColor } }) }),
+      total ? jsxs('div', { children: [
+        jsx('div', {
+          style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' },
+          children: [jsx('span', { style: styles.label, children: 'Subtask progress' }), jsx(FlipValue, { value: `${done}/${total}`, weight: 750 })]
+        }),
+        jsx('div', { style: styles.progressTrack, children: jsx('div', { className: 'sips-progress-fill', style: { ...styles.progressFill, width: `${progress}%`, background: goalColor } }) })
+      ] }) : null,
       goal.current_subtask ? jsx('div', { style: { ...styles.label, marginTop: '8px' }, children: `Next: ${goal.current_subtask}` }) : null,
       goal.plateau_streak ? jsx('div', { style: { ...styles.rowLast, marginTop: '8px' }, children: [jsx('span', { style: styles.label, children: 'Plateau streak' }), jsx('span', { style: { ...styles.value, color: COLORS.warn, fontVariantNumeric: 'tabular-nums' }, children: goal.plateau_streak })] }) : null,
       jsx(GoalSubtasks, { api }),
@@ -1733,8 +1882,8 @@ function RuntimeCard({ api }) {
         jsx('span', { style: styles.label, children: runtime.objective || 'Session work' }),
         jsx(StateBadge, { value: runtime.status, tone: boardTone })
       ] }),
-      jsx('div', { style: styles.memoryTrack, children: [
-        jsx('div', { style: { width: `${ratio}%`, background: COLORS[boardTone] } }),
+      jsx('div', { style: styles.memoryTrack, role: 'img', 'aria-label': `Run progress ${progress.complete}/${progress.total}`, children: [
+        jsx('div', { className: 'sips-progress-fill', style: { width: `${ratio}%`, background: COLORS.amber } }),
         jsx('div', { style: { ...styles.memoryOther, width: `${100 - ratio}%` } })
       ] }),
       jsx('div', { style: styles.row, children: [
@@ -1745,8 +1894,8 @@ function RuntimeCard({ api }) {
         jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }, children: [
           jsx('span', { style: { ...styles.label, fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em' }, children: `Budget · tranche ${budget.released_tranches ?? '—'}/${trancheLimits.length || '—'} released` }),
           jsxs('span', { style: { fontSize: '11px', fontVariantNumeric: 'tabular-nums' }, children: [
-            jsx('span', { style: { fontWeight: 650, color: budget.soft_exceeded ? COLORS.warn : COLORS.text }, children: fmtCompact(charged) }),
-            jsx('span', { style: { color: COLORS.muted }, children: ` / ${fmtCompact(currentTranche)}` })
+            jsx(FlipValue, { value: fmtCompact(charged), color: budget.soft_exceeded ? COLORS.amber : COLORS.letter, weight: 750 }),
+            jsx('span', { style: { color: COLORS.steelDim, fontFamily: MONO }, children: ` / ${fmtCompact(currentTranche)}` })
           ] })
         ] }),
         jsx('div', {
@@ -1757,13 +1906,17 @@ function RuntimeCard({ api }) {
         }),
         overTranche && trancheLimits.length > (Number(budget.released_tranches) || 1) ? jsx('div', { style: { ...styles.label, fontSize: '10px', color: COLORS.warn }, children: `Soft budget exceeded — next tranche releases at ${fmtCompact(trancheLimits[Math.min(Number(budget.released_tranches) || 1, trancheLimits.length)])}` }) : null,
         budget.soft_exceeded ? jsx('div', { style: { ...styles.label, fontSize: '10px', color: COLORS.warn }, children: 'Reservation exceeds soft limit — charged at lease time, nothing is gated; tranches release on demand' }) : null,
-        resourceRows.length ? jsx('div', { style: { display: 'grid', gap: '4px', marginTop: '4px' }, children: resourceRows.map((row) => jsx('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '10px' }, children: [
-          jsx('span', { style: { fontSize: '11px', fontFamily: 'ui-monospace, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: formatStatus(row.key) }),
-          jsxs('span', { style: { flexShrink: 0, fontSize: '11px', fontVariantNumeric: 'tabular-nums', color: row.used / row.limit >= 0.9 ? COLORS.warn : COLORS.muted }, children: [
-            fmtCompact(row.used), ' / ', fmtCompact(row.limit),
-            jsx('div', { style: { height: '3px', width: '72px', marginTop: '2px', borderRadius: '999px', background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }, children: jsx('div', { style: { height: '100%', width: `${Math.min(100, row.used / row.limit * 100)}%`, background: row.used / row.limit >= 0.9 ? COLORS.warn : COLORS.accent, opacity: 0.7 } }) })
-          ] })
-        ] }, `res-${row.key}`)) }) : null
+        resourceRows.length ? jsx('div', { style: { display: 'grid', gap: '6px', marginTop: '6px' }, children: resourceRows.map((row) => {
+          const ratio = Math.min(1, row.used / row.limit)
+          const hot = ratio >= 0.9
+          return jsxs('div', { style: { display: 'grid', gap: '3px' }, children: [
+            jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '10px' }, children: [
+              jsx('span', { style: { fontSize: '10.5px', fontFamily: MONO, textTransform: 'uppercase', letterSpacing: '0.07em', color: COLORS.steelDim, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: formatStatus(row.key) }),
+              jsx('span', { style: { flexShrink: 0, fontSize: '11px', fontVariantNumeric: 'tabular-nums', fontFamily: MONO, color: hot ? COLORS.amber : COLORS.steel }, children: `${fmtCompact(row.used)} / ${fmtCompact(row.limit)}` })
+            ] }),
+            jsx('div', { style: styles.miniTrack, role: 'img', 'aria-label': `${row.key}: ${fmtCompact(row.used)} of ${fmtCompact(row.limit)}`, children: jsx('div', { style: { height: '100%', width: `${ratio * 100}%`, background: hot ? COLORS.amber : COLORS.steelDim } }) })
+          ] }, `res-${row.key}`)
+        }) }) : null
       ] }) : null,
       tasks.slice(0, 4).map((task) => jsxs('div', { style: styles.row, children: [
         jsx('span', { style: styles.label, children: [
@@ -1783,7 +1936,7 @@ function RuntimeCard({ api }) {
 function runStatusTone(status) {
   if (status === 'running') return 'accent'
   if (status === 'succeeded') return 'good'
-  if (status === 'stale') return 'warn'
+  if (status === 'stale') return 'muted' // stale is the resting state, not an alarm
   if (status === 'failed') return 'bad'
   return 'muted'
 }
@@ -2401,9 +2554,9 @@ function RunsCard({ api }) {
             detail: jsx(RunDetail, { api, runId: run.run_id || `run-${index}` }),
             children: [
               jsx('div', { style: styles.listMain, children: [
-                jsx('span', { style: styles.listId, title: run.label ? `${run.label} (${run.run_id})` : run.run_id, children: run.label ? `${run.label} · ${run.run_id || '?'}` : run.run_id || '?' }),
+                jsx('span', { style: styles.listId, title: run.label ? `${run.label} (${run.run_id})` : run.run_id, children: run.label ? `${run.label} · ${truncateMiddle(run.run_id || '?', 24)}` : truncateMiddle(run.run_id || '?', 24) }),
                 jsxs('span', { style: styles.listMeta, children: [
-                  jsx('span', { style: { ...styles.value, fontVariantNumeric: 'tabular-nums' }, children: `${run.events ?? 0} events` }),
+                  jsx(FlipValue, { value: `${run.events ?? 0} ev`, title: `${run.events ?? 0} events`, size: '10.5px' }),
                   Number(run.receipts) > 0 ? jsx('span', { style: styles.taskAttempts, children: `${run.receipts} receipt${run.receipts === 1 ? '' : 's'}` }) : null,
                   run.progress?.total ? jsx('span', {
                     title: `${run.progress.succeeded} succeeded · ${run.progress.failed} failed · ${run.progress.active} active`,
@@ -2411,14 +2564,14 @@ function RunsCard({ api }) {
                     children: `${run.progress.succeeded}/${run.progress.total} tasks`
                   }) : null,
                   jsx(StateBadge, { value: run.status, tone: runStatusTone(run.status) }),
-                  jsx('span', { style: styles.eventTime, children: formatRelativeTimestamp(run.updated_at) })
+                  jsx('span', { style: { ...styles.eventTime, flexShrink: 0 }, children: formatRelativeTimestamp(run.updated_at) })
                 ] })
               ] }),
-              run.objective ? jsx('div', { style: run.status === 'failed' ? { ...styles.listSecondary, color: COLORS.bad } : styles.listSecondary, title: run.objective, children: run.objective }) : null
+              run.objective && run.objective !== (run.label || run.run_id) ? jsx('div', { style: run.status === 'failed' ? { ...styles.listSecondary, color: COLORS.red } : styles.listSecondary, title: run.objective, children: run.objective }) : null
             ]
           }, `run-${run.run_id || index}`))
         }),
-        statusSummary ? jsx('div', { style: styles.drillMeta, children: statusSummary }) : null
+        statusSummary ? jsx('div', { style: styles.drillMeta, children: `${statusSummary} · ${entries.length} of ${compactNumber(runs.total ?? entries.length)} shown` }) : null
       ]
     }) : jsx('div', { style: styles.unavailable, children: 'No session runs recorded yet.' })
   })
@@ -3083,8 +3236,8 @@ function ContextScanCard({ api }) {
       const read = String(row.bounded_read || '')
       return jsxs('div', {
         children: [
-          jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '10px', marginBottom: '4px' }, children: [
-            jsxs('span', { title: row.path, style: { display: 'inline-flex', alignItems: 'center', minWidth: 0, fontSize: '12px', fontWeight: 650, fontFamily: 'ui-monospace, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: [
+          jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '10px', marginBottom: '4px', flexWrap: 'wrap' }, children: [
+            jsxs('span', { title: row.path, style: { display: 'inline-flex', alignItems: 'center', minWidth: 0, flex: '1 1 200px', fontSize: '11.5px', fontWeight: 650, fontFamily: MONO, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: [
               jsx('span', { 'aria-hidden': true, style: { flexShrink: 0, width: '7px', height: '7px', borderRadius: '999px', background: tone, marginRight: '6px' } }),
               row.path || 'unknown path'
             ] }),
@@ -3259,8 +3412,8 @@ function TimelineCard({ api }) {
           children: [
             jsx('span', { 'aria-hidden': true, style: { color, flexShrink: 0, width: '12px', textAlign: 'center' }, children: glyphFor(entry) }),
             jsx('span', { title: entry.id, style: { color, fontFamily: 'ui-monospace, monospace', fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: String(entry.id || '?').slice(0, 24) }),
-            jsx('span', { style: { flexShrink: 0, marginLeft: 'auto', color: COLORS.muted, fontSize: '11px' }, children: formatRelativeTimestamp(entry.ts ? entry.ts * 1000 : null) }),
-            jsx('span', { style: { flexShrink: 0, color: COLORS.muted, fontSize: '11px', fontVariantNumeric: 'tabular-nums' }, children: countLabel })
+            jsx('span', { style: { flexShrink: 0, marginLeft: 'auto', color: COLORS.steelDim, fontSize: '11px', fontFamily: MONO }, children: formatRelativeTimestamp(entry.ts ? entry.ts * 1000 : null) }),
+            jsx(FlipValue, { value: countLabel, size: '10.5px' })
           ]
         }, `timeline-${entry.kind || 'run'}-${entry.id}`)
       }) }),
@@ -3527,7 +3680,7 @@ function OverviewStripCard({ api }) {
     legs.push(jsx(Signal, {
       key: 'verdicts',
       label: 'Worst tool',
-      value: String(verdicts.worst_tool || 'unknown').slice(0, 24),
+      value: truncateMiddle(String(verdicts.worst_tool || 'unknown'), 14),
       detail: `${formatStatus(verdicts.worst_verdict)} · ${compactNumber(verdicts.calls_in_window)} calls in window`,
       tone: VERDICT_TONE[verdicts.worst_verdict] || 'muted'
     }))
@@ -3809,7 +3962,7 @@ function SurfaceCard({ counts, lifecycle, onOpenActivity }) {
             children: [
               jsx('div', {
                 style: styles.proofRowHeader,
-                children: [jsx('span', { style: styles.label, children: label }), jsx('span', { style: { ...styles.value, fontVariantNumeric: 'tabular-nums' }, children: compactNumber(amount) })]
+                children: [jsx('span', { style: styles.label, children: label }), jsx(FlipValue, { value: compactNumber(amount), weight: 750 })]
               }),
               jsx('div', { style: styles.miniTrack, children: jsx('div', { style: { ...styles.miniFill, width: `${width}%`, background: COLORS.accent } }) })
             ]
@@ -3968,7 +4121,7 @@ function Dashboard({ api }) {
     // Ambient atmosphere layer: hue/period/alpha encode live posture — good
     // posture breathes slowly in green, partial in amber, unhealthy pulses red.
     jsx(AtmosphereLayer, { tone: postureToneOf(data), coverage: postureCoverageOf(data) }),
-    jsxs('header', { style: styles.header, children: [jsx('div', { children: [jsx('div', { style: styles.eyebrow, children: 'SIPS CONTROL PLANE' }), jsx('h1', { style: styles.title, children: 'Self-improvement, made visible.' }), jsx('p', { style: styles.subtitle, children: data.claim_boundary || 'Read-only operational view of SIPS health, proof, goals, memory, and lifecycle activity.' })] }), jsx('div', { style: styles.actions, children: [jsx(Button, { variant: 'outline', size: 'sm', onClick: () => query.refetch(), children: refreshLabel })] })] }),
+    jsxs('header', { style: styles.header, children: [jsx('div', { children: [jsx('div', { style: styles.eyebrow, children: 'SIPS CONTROL PLANE — OPERATIONS BOARD' }), jsx('h1', { style: styles.title, children: 'The Board' }), jsx('p', { style: styles.subtitle, children: data.claim_boundary || 'Read-only operational view of SIPS health, proof, goals, memory, and lifecycle activity. Every value flips when it changes; amber is attention, red is failure, nothing is decoration.' })] }), jsx('div', { style: styles.actions, children: [jsx(Button, { variant: 'outline', size: 'sm', onClick: () => query.refetch(), children: refreshLabel })] })] }),
     query.isError ? jsx('div', { style: { ...styles.unavailable, marginBottom: '14px', borderColor: COLORS.warn }, children: 'Refresh failed; showing the last successful SIPS snapshot.' }) : null,
     jsxs('div', { style: styles.metaRow, children: [
       data.version ? jsx('span', { style: styles.metaText, children: `v${data.version}` }) : null,
@@ -3985,7 +4138,7 @@ function Dashboard({ api }) {
             'data-sips-heartbeat': selfloopQuery.data?.active && SIPS_AWAKE() ? 'on' : 'off',
             style: { ...styles.railDot, background: toneColor(data?.status), boxShadow: `0 0 8px ${toneColor(data?.status)}` }
           }),
-          jsx('span', { style: styles.tabBarLabel, children: 'Workspaces' })
+          jsx('span', { style: styles.tabBarLabel, children: 'Platforms' })
         ] }),
         jsx('div', { style: styles.railItems, children: tabs.map((tab) => jsxs('button', {
           type: 'button',
@@ -3999,7 +4152,7 @@ function Dashboard({ api }) {
             activeTab === tab.id ? jsx('span', { style: styles.railItemMark, 'aria-hidden': true }) : null,
             jsx(Codicon, { name: tab.icon, size: '0.9rem' }),
             tab.label,
-            tab.count ? jsx('span', { style: styles.tabCount, children: tab.count }) : null
+            tab.count ? jsx('span', { style: { ...styles.tabCount, marginLeft: '3px' }, children: tab.count }) : null
           ]
         }, `tab-${tab.id}`)) })
       ] }),
@@ -4064,51 +4217,40 @@ export default {
       const styleTag = document.createElement('style')
       styleTag.id = 'sips-focus-style'
       styleTag.textContent = [
-        `[data-sips-page] button:focus-visible, [data-sips-page] select:focus-visible, [data-sips-page] summary:focus-visible, [data-sips-page] a:focus-visible { outline: 2px solid ${COLORS.accent}; outline-offset: 2px; border-radius: 6px; }`,
+        // --- THE BOARD: cascade + lamps + flip --------------------------------
+        `@keyframes sips-flip-in { 0% { transform: rotateX(88deg); opacity: 0.2; } 60% { transform: rotateX(-14deg); opacity: 1; } 100% { transform: rotateX(0deg); opacity: 1; } }`,
+        `.sips-flip-in { animation: sips-flip-in 300ms cubic-bezier(0.2, 0.7, 0.3, 1) both; transform-origin: 50% 50%; backface-visibility: hidden; }`,
+        `[data-sips-page] button:focus-visible, [data-sips-page] select:focus-visible, [data-sips-page] summary:focus-visible, [data-sips-page] a:focus-visible { outline: 2px solid ${COLORS.amber}; outline-offset: 2px; border-radius: 4px; }`,
         `@property --sips-orb { syntax: '<percentage>'; inherits: false; initial-value: 0%; }`,
-        // Depth pass: resting cards lift on hover; lead cards lift further.
-        `[data-sips-card] { transition: transform 180ms cubic-bezier(0.2,0.7,0.3,1), box-shadow 180ms cubic-bezier(0.2,0.7,0.3,1), border-color 180ms ease; }`,
-        `[data-sips-card]:hover { transform: translateY(-2px); border-top-color: rgba(255,255,255,0.22); box-shadow: 0 2px 4px rgba(0,0,0,0.20), 0 12px 28px rgba(0,0,0,0.20); }`,
-        `[data-sips-lead]:hover { transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.24), 0 22px 48px rgba(0,0,0,0.30); }`,
-        `[data-sips-lead] { transition: transform 200ms cubic-bezier(0.2,0.7,0.3,1), box-shadow 200ms cubic-bezier(0.2,0.7,0.3,1); }`,
-        // Recessed wells: inputs/selects/textareas sit below the card plane.
-        `[data-sips-page] input, [data-sips-page] select, [data-sips-page] textarea { box-shadow: inset 0 1px 3px rgba(0,0,0,0.30); }`,
-        `[data-sips-page] details > div { box-shadow: inset 0 1px 3px rgba(0,0,0,0.22); }`,
-        // Ambient atmosphere layer: posture hue + breathing rate are set from JS
-        // via CSS custom properties on the wrapper. No filter blur — the radial
-        // gradients are already soft, and blur is a per-frame GPU cost.
-        `[data-sips-atmosphere] { position: absolute; inset: -80px 0 auto 0; height: 480px; pointer-events: none; z-index: 0; opacity: var(--sips-atmo-alpha, 0.55); transform: translateZ(0); will-change: opacity; }`,
-        `[data-sips-atmosphere]::before { content: ''; position: absolute; inset: 0; background: radial-gradient(560px 300px at 72% 18%, var(--sips-atmo-hue, rgba(105,211,154,0.16)), transparent 70%); animation: sips-breathe var(--sips-atmo-period, 9s) ease-in-out infinite; }`,
-        `[data-sips-atmosphere]::after { content: ''; position: absolute; inset: 0; background: radial-gradient(420px 240px at 18% 42%, var(--sips-atmo-hue-soft, rgba(125,211,252,0.10)), transparent 70%); animation: sips-breathe calc(var(--sips-atmo-period, 9s) * 1.6) ease-in-out infinite reverse; }`,
-        `[data-sips-heartbeat] { animation: sips-breathe 4s ease-in-out infinite; animation-play-state: paused; }`,
-        `[data-sips-heartbeat="on"] { animation-play-state: running; }`,
-        `@keyframes sips-breathe { 0%, 100% { opacity: 0.25; } 50% { opacity: 0.5; } }`,
-        // Selfloop shimmer: a faint conic highlight orbiting the hero edge while
-        // the self-improvement loop runs. Purely decorative, evidence-gated by
-        // the data attribute set from live selfloop state.
+        // Board panels: resting cards sit in the chassis; leads project.
+        `[data-sips-card] { transition: transform 160ms cubic-bezier(0.2,0.7,0.3,1), box-shadow 160ms cubic-bezier(0.2,0.7,0.3,1), border-color 160ms ease; }`,
+        `[data-sips-card]:hover { transform: translateY(-2px); border-top-color: #454a52; box-shadow: 0 2px 4px rgba(0,0,0,0.5), 0 14px 32px rgba(0,0,0,0.42); }`,
+        `[data-sips-lead]:hover { transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.55), 0 24px 52px rgba(0,0,0,0.48); }`,
+        `[data-sips-lead] { transition: transform 180ms cubic-bezier(0.2,0.7,0.3,1), box-shadow 180ms cubic-bezier(0.2,0.7,0.3,1); }`,
+        `input, select, textarea { box-shadow: inset 0 1px 3px rgba(0,0,0,0.5); }`,
+        // Orbit lamp: selfloop indicator circling the hero frame while active.
         `[data-sips-selfloop] { position: relative; overflow: hidden; }`,
-        `[data-sips-selfloop="on"]::before { content: ''; position: absolute; inset: -60%; background: conic-gradient(from var(--sips-spin, 0deg), transparent 0deg, rgba(125,211,252,0.05) 40deg, rgba(105,211,154,0.07) 70deg, transparent 110deg); z-index: 0; pointer-events: none; animation: sips-orbit 26s linear infinite; }`,
-        `@keyframes sips-orbit { to { transform: rotate(360deg); } }`,
-        // Mission rail states.
-        `[data-sips-railitem] { transition: background 130ms ease, color 130ms ease; }`,
-        `[data-sips-railitem]:hover { background: rgba(255,255,255,0.055); color: ${COLORS.text}; }`,
-        `[data-sips-railitem="active"] { background: rgba(255,255,255,0.07); color: ${COLORS.text}; box-shadow: inset 0 1px 0 rgba(255,255,255,0.07); }`,
-        // Instrument press: the push button's cap sinks into its recess.
+        `[data-sips-selfloop="on"]::after { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; border: 1px solid rgba(255,176,0,0.0); box-shadow: inset 0 0 0 0 rgba(255,176,0,0); animation: sips-lamp-pulse 3.2s ease-in-out infinite; }`,
+        `@keyframes sips-lamp-pulse { 0%, 100% { box-shadow: inset 0 0 0 0 rgba(255,176,0,0); border-color: rgba(255,176,0,0); } 50% { box-shadow: inset 0 0 18px -6px rgba(255,176,0,0.28); border-color: rgba(255,176,0,0.35); } }`,
+        // Platform rail states: flap tile tabs; active tab lights.
+        `[data-sips-railitem] { transition: background 130ms ease, color 130ms ease, border-color 130ms ease; }`,
+        `[data-sips-railitem]:hover { background: ${COLORS.flap}; border-color: ${COLORS.seam}; color: ${COLORS.letter}; }`,
+        `[data-sips-railitem="active"] { background: ${COLORS.flapRaised}; border-color: rgba(255,176,0,0.30); color: ${COLORS.letter}; box-shadow: inset 2px 0 0 ${COLORS.amber}; }`,
+        // Push button press.
         `[data-sips-push] { transition: transform 90ms ease, box-shadow 90ms ease; }`,
-        `[data-sips-push]:not(:disabled):active { transform: translateY(1px); box-shadow: inset 0 4px 9px rgba(0,0,0,0.8), inset 0 1px 2px rgba(0,0,0,0.6); }`,
-        `[data-sips-push]:not(:disabled):active span { transform: translateY(1px); }
-        [data-sips-push] span { transition: transform 90ms ease; }`,
-        // Workspace mount: cheap opacity/translate on the entering content only —
-        // no full-page View Transition snapshot.
+        `[data-sips-push]:not(:disabled):active { transform: translateY(1px); box-shadow: inset 0 4px 9px rgba(0,0,0,0.85), inset 0 1px 2px rgba(0,0,0,0.65); }`,
+        `[data-sips-push]:not(:disabled):active span { transform: translateY(1px); }`,
+        `[data-sips-push] span { transition: transform 90ms ease; }`,
+        // Workspace mount + heartbeat dot.
         `[data-sips-workspace] { animation: sips-mount 170ms cubic-bezier(0.2,0.7,0.3,1) both; }`,
-        `@keyframes sips-mount { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }`,
-        `::view-transition-old(root) { animation: sips-vt-out 120ms ease-in both; }`,
-        `::view-transition-new(root) { animation: sips-vt-in 160ms ease-out both; }`,
-        `@keyframes sips-vt-out { to { opacity: 0; } }`,
-        `@keyframes sips-vt-in { from { opacity: 0; transform: translateY(8px); } }`,
-        `@media (prefers-reduced-motion: reduce) { [data-sips-heartbeat] { animation: none !important; } ::view-transition-old(root), ::view-transition-new(root) { animation: none !important; } [data-sips-card], [data-sips-lead] { transition: none !important; } [data-sips-card]:hover, [data-sips-lead]:hover { transform: none !important; } [data-sips-atmosphere]::before, [data-sips-atmosphere]::after, [data-sips-selfloop="on"]::before, [data-sips-workspace] { animation: none !important; } [data-sips-railitem], [data-sips-push], [data-sips-push] span { transition: none !important; } }`,
-        // Dial needle + toggle knob snap instead of sweeping under reduced motion.
-        `@media (prefers-reduced-motion: reduce) { [style*="dial-needle"], .sips-dial-needle, .sips-toggle-knob { transition: none !important; } }`
+        `@keyframes sips-mount { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }`,
+        `[data-sips-heartbeat] { animation: sips-lamp-pulse 2.6s ease-in-out infinite; animation-play-state: paused; border-radius: 999px; }`,
+        `[data-sips-heartbeat="on"] { animation-play-state: running; }`,
+        // Progress fills: amber sweep with a lamp glint at the leading edge.
+        `.sips-progress-fill { position: relative; overflow: hidden; }`,
+        `.sips-progress-fill::after { content: ''; position: absolute; inset: 0; background: repeating-linear-gradient(45deg, rgba(0,0,0,0.14) 0 4px, transparent 4px 9px); }`,
+        // Reduced motion: the board becomes a static timetable.
+        `@media (prefers-reduced-motion: reduce) { .sips-flip-in { animation: none !important; } [data-sips-heartbeat] { animation: none !important; } [data-sips-card], [data-sips-lead] { transition: none !important; } [data-sips-card]:hover, [data-sips-lead]:hover { transform: none !important; } [data-sips-selfloop="on"]::after, [data-sips-workspace] { animation: none !important; } [data-sips-railitem], [data-sips-push], [data-sips-push] span { transition: none !important; } .sips-dial-needle, .sips-toggle-knob { transition: none !important; } }`
       ].join('\n')
       document.head.appendChild(styleTag)
     }

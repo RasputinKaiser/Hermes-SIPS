@@ -3,13 +3,14 @@
 
 Replaces the raw memory_fabric_prompt_search at the UserPromptSubmit slot.
 Searches Memory Fabric for the user's prompt, scoped to the current working
-directory, then RANKS the results so the most actionable lessons surface first:
+directory, then RANKS the results without discarding search relevance:
 
-  1. failure-tagged records (⚠ PRIOR FAILURE) — the single most valuable signal,
-     surfaced first with a marker.
-  2. success-tagged / high-confidence records (✓ prior success) — prescriptive:
-     the last known-good approach.
-  3. everything else, most recent first.
+  1. Higher base search relevance first.
+  2. For equal relevance: recent eval failures, failure-tagged records,
+     then success-tagged / high-confidence records, then other records.
+  3. Within equal relevance and outcome class: newest first.
+
+Outcome annotations are advisory tie-breakers, not proof of correctness.
 
 Same depth on every model — v2 has no model routing. The harness's versatility
 comes from delegation (fresh-context subagents) and forced lesson capture, not
@@ -110,23 +111,33 @@ def _recent_failed_eval_cases(max_age_seconds=7 * 86400):
 
 
 def rank(records):
-    """Failure first, then eval-adjacent boosts, then success/high-confidence, then rest."""
+    """Preserve relevance; use outcome boosts then newest-first for ties.
+
+    Legacy callers without scores retain outcome ordering. Production search
+    carries `_score`, which always takes precedence over outcome annotations.
+    """
     failed_eval_cases = _recent_failed_eval_cases()
 
     def key(rec):
         tags = rec.get("tags") or []
         conf = rec.get("confidence") or ""
-        ts = rec.get("created_at") or rec.get("updated_at") or ""
+        raw_ts = rec.get("created_at") or rec.get("updated_at") or ""
+        try:
+            dt = datetime.fromisoformat(str(raw_ts).replace("Z", "+00:00"))
+            ts = dt.replace(tzinfo=timezone.utc).timestamp() if dt.tzinfo is None else dt.timestamp()
+        except (ValueError, OverflowError, OSError):
+            ts = 0.0
         body = rec.get("body") or ""
 
-        # Eval-adjacent: tags or body mention a recently-failed caseId
+        # Outcome signals are tie-breakers, never category overrides.
+        boost = 0
         if any(cid in tags or cid in body for cid in failed_eval_cases):
-            return (-1, ts)
-        if "failure" in tags:
-            return (0, ts)
-        if "success" in tags or conf == "high":
-            return (1, ts)
-        return (2, ts)
+            boost = 3
+        elif "failure" in tags:
+            boost = 2
+        elif "success" in tags or conf == "high":
+            boost = 1
+        return (-int(rec.get("_score") or 0), -boost, -ts)
     return sorted(records, key=key)
 
 

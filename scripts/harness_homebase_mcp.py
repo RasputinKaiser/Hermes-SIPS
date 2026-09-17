@@ -1469,10 +1469,14 @@ def host_audit_payload(
 
 
 def resolve_input_path(root: Path, value: str) -> Path:
-    path = Path(value).expanduser()
-    if path.is_absolute():
-        return path.resolve()
-    return (root / path).resolve()
+    """Resolve a caller-supplied input path against the workspace root.
+
+    The returned path is always canonical and contained within the root —
+    symlinks and ``..`` cannot escape it.
+    """
+    from sips_path_containment import canonical_within
+
+    return canonical_within(value, allowed_roots=[root])
 
 
 def distill_payload(root: Path, inputs: list[str], query: str, max_lines: int, max_chars: int) -> dict[str, Any]:

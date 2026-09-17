@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""eval_grader_parity.py — golden vectors proving Python grader == Swift grader.
+"""eval_grader_parity.py — golden vectors for the SIPS Python grader contract.
 
-Loads golden test cases and asserts the Python grader's output matches the
-expected (score, passed) computed from the Swift EvalGrader's documented
-behavior. If this test fails, the two implementations have drifted and the
-weekly sweep's eval results are unreliable.
+Originally mirrored Swift EvalGrader. Required transcript events now fail when
+absent; these corrected vectors no longer certify parity with an unchanged
+external Swift implementation. The filename remains for CLI compatibility.
 
 The golden vectors live in references/eval_grader_golden.json. Each vector:
 {

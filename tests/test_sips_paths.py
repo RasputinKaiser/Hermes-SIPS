@@ -20,6 +20,7 @@ def test_harness_home_prefers_sips_home(monkeypatch, tmp_path):
 def test_harness_home_ignores_legacy_ncode_home(monkeypatch, tmp_path):
     ncode_home = tmp_path / "ncode-home"
     monkeypatch.delenv("SIPS_HOME", raising=False)
+    monkeypatch.delenv("HERMES_HOME", raising=False)
     monkeypatch.setenv("NCODE_HOME", str(ncode_home))
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
 

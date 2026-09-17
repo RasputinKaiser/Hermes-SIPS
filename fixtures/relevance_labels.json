@@ -1,0 +1,27 @@
+[
+  {
+    "prompt": "SQLite index rebuild",
+    "expected_ids": ["rec-1"],
+    "forbidden_ids": []
+  },
+  {
+    "prompt": "frontier fanout bounded retrieval",
+    "expected_ids": ["rec-2"],
+    "forbidden_ids": []
+  },
+  {
+    "prompt": "index",
+    "expected_ids": ["rec-1"],
+    "forbidden_ids": []
+  },
+  {
+    "prompt": "retrieval",
+    "expected_ids": ["rec-1", "rec-2"],
+    "forbidden_ids": []
+  },
+  {
+    "prompt": "graph",
+    "expected_ids": ["rec-2"],
+    "forbidden_ids": []
+  }
+]

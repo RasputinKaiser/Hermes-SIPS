@@ -430,6 +430,36 @@ def record_tool_call(sid: str) -> None:
         run.disabled = True
 
 
+def close_session(sid: str, *, exit_reason: str) -> None:
+    """Release a session at teardown without fabricating verifier results.
+
+    Cancellation means the observational run ended without verified completion;
+    it does not assert that the user's task failed.
+    """
+    key = str(sid)
+    with _LOCK:
+        run = _ACTIVE.get(key)
+        if run is None:
+            _EVIDENCE_PATHS.pop(key, None)
+            return
+        try:
+            controller = _controller()
+            state = controller.read_status(run.run_id)
+            if state["status"] not in {"completed", "failed", "canceled"}:
+                controller.cancel(
+                    run.run_id,
+                    reason=f"unverified lifecycle teardown: {exit_reason}",
+                    idempotency_key=f"{run.run_id}:unverified-close",
+                    expected_revision=state["revision"],
+                )
+        except Exception as exc:
+            logger.debug("SIPS neutral close skipped: %s", type(exc).__name__)
+            return  # Keep the handle so a later teardown can retry.
+        run.finished = True
+        _ACTIVE.pop(key, None)
+        _EVIDENCE_PATHS.pop(key, None)
+
+
 def finish_session(
     sid: str, *, completed: bool, tool_calls: int, failures: int, turns: int, exit_reason: str
 ) -> None:

@@ -179,8 +179,8 @@ def _check_grep(args, sandbox):
 def _check_transcript_sequence(args, tool_sequence):
     before = args.get("before", "")
     first = args.get("first", "")
-    if not before:
-        return {"score": 0.0, "evidence": "missing 'before' argument", "passed": False}
+    if not before or not first:
+        return {"score": 0.0, "evidence": "missing 'first' or 'before' argument", "passed": False}
     try:
         first_re = re.compile(first) if first else None
         before_re = re.compile(before)
@@ -202,9 +202,10 @@ def _check_transcript_sequence(args, tool_sequence):
         return {"score": 0.0,
                 "evidence": f"before-pattern matched at {before_idx} but first({first}) never appeared",
                 "passed": False}
-    return {"score": 1.0,
-            "evidence": f"before-pattern ({before}) never matched; sequence ok",
-            "passed": True}
+    ok = first_idx is not None and args.get("beforeOptional") is True
+    return {"score": 1.0 if ok else 0.0,
+            "evidence": f"before-pattern ({before}) never matched; first index={first_idx}; optional={ok}",
+            "passed": ok}
 
 
 def run_case(eval_case, timeout_seconds=None):

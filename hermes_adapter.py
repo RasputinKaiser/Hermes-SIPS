@@ -298,39 +298,70 @@ def _on_session_start(**kwargs: Any) -> None:
 
 
 def _on_pre_llm_call(**kwargs: Any) -> dict[str, str] | None:
+    """Inject memory context via the unified MemoryService."""
     configure_environment()
     sid = _session_id(kwargs)
     _update_session(sid, turns=1)
     contexts = _consume_context(sid)
     prompt = kwargs.get("user_message") or ""
-    recall = _run_script(
-        "recall_ranker.py",
-        {
-            "hook_event_name": "UserPromptSubmit",
-            "session_id": sid,
-            "task_id": kwargs.get("task_id") or "",
-            "turn_id": kwargs.get("turn_id") or "",
-            "cwd": _cwd(kwargs),
-            "prompt": prompt,
-        },
-        timeout=8,
-    )
-    recall_context = _json_output(recall).get("additionalContext")
+
+    recall_context: str | None = None
+    try:
+        from sips_runtime.memory_service import retrieve
+
+        cwd = _cwd(kwargs)
+        result = retrieve(query=prompt, scope=cwd, limit=4, shadow=True)
+        records = result.get("records") or []
+
+        header = "🧠 scoped recall (%d lessons): query '%s'" % (len(records), prompt[:60])
+        lines = [header]
+        for rec in records:
+            title = rec.get("title", "")
+            body = (rec.get("body") or "").replace("\n", " ")[:150]
+            lines.append("- %s: %s" % (title, body))
+        if lines:
+            recall_context = "\n".join(lines)
+
+        _record_event(
+            "pre_llm_call", kwargs,
+            status="context_injected" if records else "no_context",
+            context_count=len(records),
+            source=result.get("source"),
+            elapsed_ms=result.get("elapsed_ms"),
+        )
+    except Exception:
+        logger.debug("SIPS MemoryService recall failed", exc_info=True)
+
     if isinstance(recall_context, str) and recall_context.strip():
         contexts.append(recall_context.strip())
     if not contexts:
-        _record_event("pre_llm_call", kwargs, status="no_context")
         return None
-    _record_event("pre_llm_call", kwargs, status="context_injected", context_count=len(contexts))
     return {"context": "\n\n".join(contexts)[:24000]}
 
 
 def _on_pre_tool_call(**kwargs: Any) -> dict[str, str] | None:
+    """Classify tool effects and apply policy decisions."""
     name, args = _translated_tool(kwargs)
     if not name:
         return None
     sid = _session_id(kwargs)
     _update_session(sid, tool_calls=1)
+
+    try:
+        from sips_runtime.policy import decide
+
+        decision = decide(name, args)
+        if decision["blocked"]:
+            _record_event("pre_tool_call", kwargs, status="blocked", classification=decision["effect"])
+            return {"action": "block", "message": f"SIPS policy blocked {name}: {decision['reason']}"}
+        if decision["requires_approval"]:
+            _record_event("pre_tool_call", kwargs, status="approval_required", classification=decision["effect"])
+            # In a real host, this would request approval. For now, log and allow.
+        _record_event("pre_tool_call", kwargs, status="allowed", classification=decision["effect"])
+    except Exception:
+        logger.debug("SIPS policy classification failed", exc_info=True)
+
+    # Retain legacy gate for backward compatibility
     result = _run_script(
         "autonomy_gate.py",
         {
@@ -345,12 +376,7 @@ def _on_pre_tool_call(**kwargs: Any) -> dict[str, str] | None:
     data = _json_output(result)
     if data.get("decision") == "block":
         reason = str(data.get("reason") or "SIPS autonomy gate blocked this action")[:1200]
-        _record_event("pre_tool_call", kwargs, status="blocked", classification="critical")
         return {"action": "block", "message": reason}
-    feedback = data.get("decisionFeedback")
-    if feedback:
-        _queue_context(sid, json.dumps(feedback, ensure_ascii=False), "autonomy_gate")
-    _record_event("pre_tool_call", kwargs, status="allowed" if result.get("ok") else "advisory_unavailable")
     return None
 
 
@@ -411,80 +437,36 @@ def _on_pre_verify(**kwargs: Any) -> dict[str, str] | None:
     return None
 
 
-def _record_learning(sid: str, kwargs: dict[str, Any], metrics: dict[str, Any]) -> None:
-    if int(metrics.get("tool_calls", 0)) <= 0:
-        return
-    completed = bool(kwargs.get("completed")) and not bool(kwargs.get("failed")) and not bool(kwargs.get("interrupted"))
-    outcome = "success" if completed else "failure"
-    cwd = _cwd(kwargs)
-    events = _event_path()
-    body = "\n".join(
-        [
-            f"session: {sid}",
-            f"cwd: {cwd}",
-            f"completed: {completed}",
-            f"turns: {metrics.get('turns', 0)}",
-            f"tool_calls: {metrics.get('tool_calls', 0)}",
-            f"edits: {metrics.get('edits', 0)}",
-            f"failures: {metrics.get('failures', 0)}",
-            f"exit_reason: {kwargs.get('turn_exit_reason') or 'unknown'}",
-        ]
-    )
-    command = [
-        sys.executable,
-        str(_SCRIPTS_ROOT / "memory_fabric.py"),
-        "record",
-        "--tier",
-        "learning",
-        "--title",
-        f"Hermes task {sid[:12]} — {outcome}",
-        "--body",
-        body,
-        "--scope",
-        cwd,
-        "--tags",
-        f"outcome,hermes,sips,{outcome}",
-        "--provenance-type",
-        "source_backed_agent_run",
-        "--provenance",
-        f"hermes_hook=on_session_end; session_id={sid}",
-        "--evidence-path",
-        str(events),
-        "--confidence",
-        "high" if completed else "medium",
-        "--status",
-        "active",
-    ]
-    result = _run_command(command, timeout=12)
-    _record_event("on_session_end_record", kwargs, status="recorded" if result.get("ok") else "memory_fabric_unavailable")
-
-
 def _on_session_end(**kwargs: Any) -> None:
+    """Hermes turn completion is telemetry, not a verified task outcome."""
     sid = _session_id(kwargs)
     metrics = _update_session(sid)
-    _record_learning(sid, kwargs, metrics)
-    _record_event("on_session_end", kwargs, status="ok", metrics={k: metrics.get(k, 0) for k in ("turns", "tool_calls", "edits", "failures")})
-    try:
-        from sips_session_bridge import finish_session
+    _record_event(
+        "on_session_end", kwargs, status="ok", outcome="unverified",
+        completed=bool(kwargs.get("completed")),
+        failed=bool(kwargs.get("failed")),
+        interrupted=bool(kwargs.get("interrupted")),
+        metrics={k: metrics.get(k, 0) for k in ("turns", "tool_calls", "edits", "failures")},
+    )
 
-        finish_session(
-            sid,
-            completed=True,
-            turns=metrics.get("turns", 0),
-            tool_calls=metrics.get("tool_calls", 0),
-            failures=metrics.get("failures", 0),
-            exit_reason="session_end",
-        )
+
+def _close_unverified_session(sid: str, exit_reason: str) -> None:
+    try:
+        from sips_session_bridge import close_session
+
+        close_session(sid, exit_reason=exit_reason)
     except Exception:
-        logger.debug("SIPS runtime session end skipped", exc_info=True)
+        logger.debug("SIPS runtime session teardown skipped", exc_info=True)
 
 
 def _on_session_finalize(**kwargs: Any) -> None:
+    _close_unverified_session(_session_id(kwargs), "session_finalize")
     _record_event("on_session_finalize", kwargs, status="ok")
 
 
 def _on_session_reset(**kwargs: Any) -> None:
     sid = _session_id(kwargs)
+    _close_unverified_session(sid, "session_reset")
     try:
         _pending_path(sid).unlink(missing_ok=True)
     except OSError:

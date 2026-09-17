@@ -39,8 +39,14 @@ def validate_json_contract(value: Any, path: str = "$") -> None:
 
 
 def store_path(path: str | Path | None = None) -> Path:
-    raw = path or os.environ.get("CODEX_MEMORY_FABRIC_STORE") or DEFAULT_STORE
-    return Path(raw).expanduser().resolve()
+    raw = path or os.environ.get("CODEX_MEMORY_FABRIC_STORE")
+    if raw:
+        return Path(raw).expanduser().resolve()
+    if os.environ.get("SIPS_HOME") or os.environ.get("HERMES_HOME"):
+        from sips_paths import harness_home
+
+        return harness_home() / "memory-fabric" / "memory.jsonl"
+    return (Path.home() / ".codex" / "memory-fabric" / "memory.jsonl").resolve()
 
 
 def _process_lock(path: Path) -> threading.Lock:

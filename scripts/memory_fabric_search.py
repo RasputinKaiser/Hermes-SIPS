@@ -57,7 +57,9 @@ def search_records(
         score = semantic_match_score(record, semantic_profile, fields)
         if not record_matches(
             record,
-            score=score,
+            # A blank query is the existing explicit browse/filter operation.
+            # Non-empty queries must earn positive relevance.
+            score=1 if not query.strip() else score,
             tier_filter=tier_filter,
             scope=scope,
             status_filter=status_filter,

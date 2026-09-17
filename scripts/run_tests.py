@@ -262,6 +262,8 @@ def agent_patterns_json_valid():
     )
     assert r.returncode == 0, f"--json failed: {r.stderr}"
     d = json.loads(r.stdout)
+    if d == []:
+        return  # Documented empty-store JSON response; no personal data required.
     assert "outcomes" in d, f"missing outcomes key: {d}"
     assert "patterns" in d, f"missing patterns key: {d}"
 
@@ -912,7 +914,9 @@ def sips_paths_env_precedence():
 
             del os.environ["SIPS_HOME"]
             importlib.reload(sips_paths)
-            assert sips_paths.harness_home() == (Path.home() / ".codex" / "sips").resolve()
+            hermes_home = os.environ.get("HERMES_HOME")
+            expected = Path(hermes_home).expanduser().resolve() / "sips" if hermes_home else (Path.home() / ".codex" / "sips").resolve()
+            assert sips_paths.harness_home() == expected
     finally:
         if old_sips is None:
             os.environ.pop("SIPS_HOME", None)

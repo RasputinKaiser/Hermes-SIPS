@@ -23,6 +23,9 @@ def harness_home() -> Path:
     value = os.environ.get("SIPS_HOME")
     if value:
         return _expand(value)
+    hermes_home = os.environ.get("HERMES_HOME")
+    if hermes_home:
+        return _expand(hermes_home) / "sips"
     return Path.home() / ".codex" / "sips"
 
 
